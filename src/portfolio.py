@@ -38,7 +38,6 @@ def rebalanced_portfolio_returns(prices: pd.DataFrame, weights: dict[str, float]
         current_weights = current_weights / current_weights.sum()
 
         if i > 0:
-            periods_since = pd.Series([date, last_rebalance])
             if rebalance_freq == "M" and date.month != last_rebalance.month:
                 current_weights = w.copy()
                 last_rebalance = date

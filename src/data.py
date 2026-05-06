@@ -41,12 +41,25 @@ def clear_cache(tickers: list[str] | None = None) -> int:
             os.remove(os.path.join(CACHE_DIR, f))
             count += 1
         return count
-    key = _cache_key(tickers, None, None, None)
+    sorted_tickers = sorted([t.upper() for t in tickers])
     removed = 0
-    for f in [_cache_path(key), _meta_path(key)]:
-        if os.path.exists(f):
-            os.remove(f)
-            removed += 1
+    for fname in os.listdir(CACHE_DIR):
+        if not fname.endswith(".json"):
+            continue
+        meta_file = os.path.join(CACHE_DIR, fname)
+        try:
+            with open(meta_file, "r") as f:
+                meta = json.load(f)
+            cached_tickers = sorted([t.upper() for t in meta.get("tickers", [])])
+            if cached_tickers == sorted_tickers:
+                parquet_file = meta_file.replace(".json", ".parquet")
+                if os.path.exists(parquet_file):
+                    os.remove(parquet_file)
+                    removed += 1
+                os.remove(meta_file)
+                removed += 1
+        except Exception:
+            pass
     return removed
 
 

@@ -6,18 +6,21 @@ import quantstats as qs
 RISK_FREE_RATE = 0.04
 
 
-def annualized_return(returns: pd.Series) -> float:
+def cagr(returns: pd.Series) -> float:
     total = (1 + returns).prod()
-    n_periods = len(returns)
-    if n_periods == 0:
+    n_days = len(returns)
+    if n_days == 0:
         return 0.0
-    periods_per_year = 252
-    return (total ** (periods_per_year / n_periods)) - 1
+    return total ** (252 / n_days) - 1
+
+
+def annualized_return(returns: pd.Series) -> float:
+    return cagr(returns)
 
 
 def annualized_volatility(returns: pd.Series) -> float:
     periods_per_year = 252
-    return returns.std() * np.sqrt(periods_per_year)
+    return returns.std(ddof=1) * np.sqrt(periods_per_year)
 
 
 def sharpe_ratio(returns: pd.Series, rf: float = RISK_FREE_RATE) -> float:
@@ -29,15 +32,13 @@ def sharpe_ratio(returns: pd.Series, rf: float = RISK_FREE_RATE) -> float:
 
 
 def sortino_ratio(returns: pd.Series, rf: float = RISK_FREE_RATE) -> float:
-    downside = returns[returns < 0]
-    if len(downside) == 0:
-        return float("inf")
-    periods_per_year = 252
-    downside_vol = downside.std() * np.sqrt(periods_per_year)
+    threshold = rf / 252
+    downside_diff = np.minimum(returns - threshold, 0.0)
+    downside_dev = np.sqrt((downside_diff ** 2).mean()) * np.sqrt(252)
     excess = annualized_return(returns) - rf
-    if downside_vol == 0:
-        return 0.0
-    return excess / downside_vol
+    if downside_dev == 0:
+        return float("inf")
+    return excess / downside_dev
 
 
 def calmar_ratio(returns: pd.Series, rf: float = RISK_FREE_RATE) -> float:
@@ -96,14 +97,6 @@ def compute_beta(returns: pd.Series, benchmark_returns: pd.Series) -> float:
     if variance == 0:
         return 0.0
     return covariance / variance
-
-
-def cagr(returns: pd.Series) -> float:
-    total = (1 + returns).prod()
-    n_days = len(returns)
-    if n_days == 0:
-        return 0.0
-    return total ** (252 / n_days) - 1
 
 
 def compute_all_metrics(returns: pd.Series, benchmark_returns: pd.Series | None = None, rf: float = RISK_FREE_RATE) -> dict:

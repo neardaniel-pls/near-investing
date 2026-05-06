@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import logging
 from pypfopt import (
     EfficientFrontier,
     EfficientCVaR,
@@ -235,6 +236,7 @@ def efficient_frontier_data(prices: pd.DataFrame, n_points: int = 100, risk_free
             frontier_returns.append(perf[0])
             frontier_risks.append(perf[1])
         except Exception:
+            logging.warning("Efficient frontier: failed to find portfolio for target return %.4f", r)
             continue
 
     strategy_points = compute_frontier_strategy_points(prices, risk_free_rate=risk_free_rate)
@@ -281,7 +283,7 @@ def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float
                 "weights": weights,
             }
         except Exception:
-            pass
+            logging.warning("Failed to compute frontier strategy point: %s", name)
 
     try:
         kelly_w = kelly_criterion(prices)
@@ -301,7 +303,7 @@ def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float
                 "weights": kelly_w,
             }
     except Exception:
-        pass
+        logging.warning("Failed to compute Kelly Criterion for frontier")
 
     return points
 
@@ -327,6 +329,7 @@ def optimize_all_strategies(prices: pd.DataFrame, risk_free_rate: float = 0.04) 
             else:
                 results[name] = optimize_portfolio(prices, target=target, risk_free_rate=risk_free_rate)
         except Exception:
+            logging.warning("Failed to optimize strategy: %s", name)
             results[name] = {t: 0.0 for t in prices.columns}
 
     return results

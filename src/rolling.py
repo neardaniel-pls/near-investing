@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.optimization import optimize_portfolio
 from src.portfolio import build_portfolio_returns
 from src.metrics import sharpe_ratio, annualized_return, annualized_volatility, max_drawdown
@@ -14,7 +16,6 @@ def rolling_optimize(
     risk_free_rate: float = 0.04,
 ) -> pd.DataFrame:
     results = []
-    all_test_returns = []
     dates = prices.index
     n = len(dates)
 
@@ -31,6 +32,7 @@ def rolling_optimize(
         try:
             weights = optimize_portfolio(train_prices, target=target, risk_free_rate=risk_free_rate)
         except Exception:
+            logging.warning("Rolling optimize failed at %s, using equal weights", dates[train_end])
             weights = {t: 1.0 / len(prices.columns) for t in prices.columns}
 
         test_rets = build_portfolio_returns(test_prices, weights)
@@ -39,6 +41,7 @@ def rolling_optimize(
         perf = {
             "date": dates[train_end],
             "weights": weights,
+            "test_window": test_window,
             "train_sharpe": sharpe_ratio(train_rets, rf=risk_free_rate),
             "train_return": annualized_return(train_rets),
             "train_volatility": annualized_volatility(train_rets),
@@ -47,7 +50,6 @@ def rolling_optimize(
             "test_volatility": annualized_volatility(test_rets) if len(test_rets) > 1 else 0.0,
         }
         results.append(perf)
-        all_test_returns.append(test_rets)
 
     return pd.DataFrame(results)
 
@@ -57,18 +59,25 @@ def walk_forward_test_returns(rolling_results: pd.DataFrame, prices: pd.DataFram
     for _, row in rolling_results.iterrows():
         weights = row["weights"]
         date = row["date"]
+        test_window = row.get("test_window", 21)
         if date in prices.index:
             idx = prices.index.get_loc(date)
-            if idx < len(prices) - 1:
-                next_day_ret = prices.iloc[idx + 1] / prices.iloc[idx] - 1
-                port_ret = sum(weights.get(t, 0) * next_day_ret.get(t, 0) for t in weights)
-                all_rets.append({"date": prices.index[idx + 1], "return": port_ret})
+            end_idx = min(idx + test_window, len(prices))
+            if idx < end_idx:
+                window_prices = prices.iloc[idx:end_idx]
+                tickers = list(weights.keys())
+                w = np.array([weights.get(t, 0) for t in tickers])
+                window_rets = window_prices[tickers].pct_change().dropna()
+                if len(window_rets) > 0:
+                    port_rets = (window_rets * w).sum(axis=1)
+                    for d, r in port_rets.items():
+                        all_rets.append({"date": d, "return": r})
 
     if not all_rets:
         return pd.Series(dtype=float)
-    df = pd.DataFrame(all_rets).set_index("date")["return"]
+    df = pd.DataFrame(all_rets).drop_duplicates(subset="date", keep="first").set_index("date")["return"]
     df.name = "Walk-Forward"
-    return df
+    return df.sort_index()
 
 
 def rolling_weights_over_time(rolling_results: pd.DataFrame) -> pd.DataFrame:
@@ -92,9 +101,16 @@ def compare_rolling_strategies(
         targets = ["max_sharpe", "min_volatility", "hrp", "min_cvar"]
 
     results = {}
-    for target in targets:
-        results[target] = rolling_optimize(
-            prices, target=target, train_window=train_window,
-            test_window=test_window, step=step, risk_free_rate=risk_free_rate,
-        )
+    with ThreadPoolExecutor(max_workers=min(len(targets), 4)) as executor:
+        futures = {
+            executor.submit(
+                rolling_optimize, prices, target=target,
+                train_window=train_window, test_window=test_window,
+                step=step, risk_free_rate=risk_free_rate,
+            ): target
+            for target in targets
+        }
+        for future in as_completed(futures):
+            target = futures[future]
+            results[target] = future.result()
     return results

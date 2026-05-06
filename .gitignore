@@ -8,4 +8,5 @@ data/user_config.json
 *_report.html
 .ipynb_checkpoints/
 .DS_Store
+.kilo
 Thumbs.db

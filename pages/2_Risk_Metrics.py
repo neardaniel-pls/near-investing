@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.metrics import (
     compute_all_metrics, metrics_table, sharpe_ratio, sortino_ratio,
     calmar_ratio, omega_ratio, annualized_return, annualized_volatility,
-    max_drawdown, cvar, cagr,
+    max_drawdown, cvar, cagr, quantstats_report,
 )
 from src.ui import (
     init_shared_state, require_data, render_workflow_stepper,
@@ -58,9 +58,10 @@ def _compute_rolling(window_returns: pd.Series, metric: str, rf: float) -> float
         if metric == "Sharpe Ratio":
             return (ann_ret - rf) / ann_vol if ann_vol != 0 else 0.0
         elif metric == "Sortino Ratio":
-            downside = r[r < 0]
-            ds_vol = downside.std() * np.sqrt(252) if len(downside) > 0 else 1e-10
-            return (ann_ret - rf) / ds_vol
+            threshold = rf / 252
+            downside_diff = np.minimum(r - threshold, 0.0)
+            downside_dev = np.sqrt((downside_diff ** 2).mean()) * np.sqrt(252)
+            return (ann_ret - rf) / downside_dev if downside_dev != 0 else float("inf")
         elif metric == "Calmar Ratio":
             cum = (1 + r).cumprod()
             mdd = ((cum - cum.cummax()) / cum.cummax()).min()
@@ -215,6 +216,33 @@ with st.expander("Drawdowns"):
         template="plotly_dark", height=500,
     )
     st.plotly_chart(fig, use_container_width=True)
+
+with st.expander("Generate QuantStats Report"):
+    st.caption("Generate a detailed HTML report for a single asset using QuantStats. "
+               "Includes rolling metrics, drawdowns, monthly returns, and more.")
+    report_ticker = st.selectbox("Asset", tickers, key="qs_report_ticker")
+    report_benchmark = st.text_input("Benchmark ticker", value="SPY", key="qs_report_bench")
+    if st.button("Generate Report", type="primary"):
+        import tempfile
+        import shutil
+        with st.spinner("Generating QuantStats report..."):
+            try:
+                tmpdir = tempfile.mkdtemp()
+                qs_out = os.path.join(tmpdir, "report.html")
+                quantstats_report(returns[report_ticker], benchmark=report_benchmark,
+                                  title=f"{report_ticker} Analysis")
+                src = f"{report_ticker.replace(' ', '_').replace('^', 'idx')}_report.html"
+                if os.path.exists(src):
+                    shutil.move(src, qs_out)
+                    with open(qs_out, "rb") as f:
+                        st.download_button("Download HTML Report", f,
+                                           file_name=f"{report_ticker}_report.html",
+                                           mime="text/html")
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                else:
+                    st.error("Report file not found. Check that quantstats is installed correctly.")
+            except Exception as e:
+                st.error(f"Failed to generate report: {e}")
 
 st.markdown("---")
 render_next_button("Backtest", "3_Backtest.py")

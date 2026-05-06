@@ -12,6 +12,7 @@ from src.portfolio import build_portfolio_returns
 from src.monte_carlo import (
     simulate_portfolio_monte_carlo,
     simulate_historical_bootstrap,
+    simulate_multivariate_monte_carlo,
     monte_carlo_statistics,
     monte_carlo_return_stats,
 )
@@ -57,6 +58,9 @@ with st.sidebar:
                            help="252 = ~1 year, 504 = ~2 years, 1260 = ~5 years.")
     seed = st.number_input("Random seed", value=42,
                             help="Fixed seed means reproducible results. Change it for different random scenarios.")
+    use_multivariate = st.checkbox("Use multivariate simulation",
+                                    help="Simulate each asset independently then combine (captures correlations). "
+                                    "Uncheck to simulate the portfolio as a single return series (faster).")
 
 if not weights_valid:
     st.stop()
@@ -80,12 +84,19 @@ if rec_weights:
 portfolio_rets = build_portfolio_returns(prices, weights)
 
 with st.spinner("Running simulations..."):
-    paths = simulate_portfolio_monte_carlo(
-        portfolio_rets, n_simulations=n_sims, n_days=n_days,
-        initial_value=initial_value, random_seed=seed,
-    )
+    if use_multivariate:
+        paths = simulate_multivariate_monte_carlo(
+            prices, weights, n_simulations=n_sims, n_days=n_days,
+            initial_value=initial_value, random_seed=seed, use_historical=False,
+        )
+    else:
+        portfolio_rets = build_portfolio_returns(prices, weights)
+        paths = simulate_portfolio_monte_carlo(
+            portfolio_rets, n_simulations=n_sims, n_days=n_days,
+            initial_value=initial_value, random_seed=seed,
+        )
     bootstrap_paths = simulate_historical_bootstrap(
-        portfolio_rets, n_simulations=n_sims, n_days=n_days,
+        build_portfolio_returns(prices, weights), n_simulations=n_sims, n_days=n_days,
         initial_value=initial_value, random_seed=seed,
     )
 
@@ -93,7 +104,10 @@ col_param, col_boot = st.columns(2)
 
 with col_param:
     st.subheader("Parametric Monte Carlo")
-    st.caption("Simulated paths assuming normal distribution of returns.")
+    if use_multivariate:
+        st.caption("Simulated paths using multivariate normal distribution (captures asset correlations).")
+    else:
+        st.caption("Simulated paths assuming normal distribution of returns.")
     n_show = min(200, paths.shape[1])
     fig = go.Figure()
     for i in range(n_show):

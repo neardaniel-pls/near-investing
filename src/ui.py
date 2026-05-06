@@ -123,6 +123,10 @@ def render_weight_sliders(tickers: list, key_prefix: str, default_weights: dict 
 
     total = sum(weights.values())
 
+    if total == 0:
+        st.error("All weights are 0% — at least one asset must have a non-zero allocation.")
+        return weights, False
+
     if auto_normalize and total > 0:
         weights = {k: v / total for k, v in weights.items()}
         total = 1.0
