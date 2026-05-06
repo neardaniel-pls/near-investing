@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-from src.metrics import max_drawdown, cvar, annualized_return, annualized_volatility, sharpe_ratio, sortino_ratio, calmar_ratio
 
 
 def simulate_portfolio_monte_carlo(

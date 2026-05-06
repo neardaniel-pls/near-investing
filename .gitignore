@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+data/cache/
+data/user_config.json
+.streamlit/secrets.toml
+*_report.html
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db

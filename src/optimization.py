@@ -10,7 +10,6 @@ from pypfopt import (
     black_litterman,
     objective_functions,
 )
-from pypfopt.plotting import plot_efficient_frontier  # noqa: F401
 
 
 OPTIMIZATION_TARGETS = [
@@ -19,7 +18,7 @@ OPTIMIZATION_TARGETS = [
     "max_return_min_risk",
     "min_cvar",
     "min_semivariance",
-    "max_sortino",
+    "semivariance_utility",
     "max_quadratic_utility",
     "efficient_return",
     "efficient_risk",
@@ -91,7 +90,7 @@ def optimize_portfolio(
         es.min_semivariance()
         return dict(es.clean_weights())
 
-    elif target == "max_sortino":
+    elif target == "semivariance_utility":
         returns = prices.pct_change().dropna()
         es = EfficientSemivariance(mu, returns)
         es.max_quadratic_utility(risk_aversion=1)
@@ -258,7 +257,7 @@ def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float
         "Min Volatility": "min_volatility",
         "Min CVaR": "min_cvar",
         "Min Semivariance": "min_semivariance",
-        "Max Sortino": "max_sortino",
+        "Semivariance Utility": "semivariance_utility",
         "Max Quadratic Utility": "max_quadratic_utility",
         "HRP": "hrp",
     }
@@ -315,7 +314,7 @@ def optimize_all_strategies(prices: pd.DataFrame, risk_free_rate: float = 0.04) 
         ("Max Quadratic Utility", "max_quadratic_utility"),
         ("Min CVaR", "min_cvar"),
         ("Min Semivariance", "min_semivariance"),
-        ("Max Sortino", "max_sortino"),
+        ("Semivariance Utility", "semivariance_utility"),
         ("Max Return Min Risk", "max_return_min_risk"),
         ("HRP", "hrp"),
         ("Kelly Criterion", None),

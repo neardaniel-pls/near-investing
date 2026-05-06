@@ -109,3 +109,15 @@ def compute_returns(prices: pd.DataFrame) -> pd.DataFrame:
 
 def fetch_info(ticker: str) -> dict:
     return yf.Ticker(ticker).info
+
+
+def fetch_ticker_names(tickers: list[str]) -> dict[str, str]:
+    names = {}
+    for t in tickers:
+        try:
+            info = yf.Ticker(t).info
+            name = info.get("shortName") or info.get("longName") or t
+            names[t] = name
+        except Exception:
+            names[t] = t
+    return names

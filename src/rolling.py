@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from src.optimization import optimize_portfolio
 from src.portfolio import build_portfolio_returns
-from src.metrics import sharpe_ratio, annualized_return, annualized_volatility, max_drawdown, cagr
+from src.metrics import sharpe_ratio, annualized_return, annualized_volatility, max_drawdown
 
 
 def rolling_optimize(

@@ -11,18 +11,12 @@ def annualized_return(returns: pd.Series) -> float:
     n_periods = len(returns)
     if n_periods == 0:
         return 0.0
-    if returns.index.inferred_freq == "B" or returns.index.inferred_freq == "D":
-        periods_per_year = 252
-    else:
-        periods_per_year = 252
+    periods_per_year = 252
     return (total ** (periods_per_year / n_periods)) - 1
 
 
 def annualized_volatility(returns: pd.Series) -> float:
-    if returns.index.inferred_freq == "B" or returns.index.inferred_freq == "D":
-        periods_per_year = 252
-    else:
-        periods_per_year = 252
+    periods_per_year = 252
     return returns.std() * np.sqrt(periods_per_year)
 
 
@@ -112,14 +106,14 @@ def cagr(returns: pd.Series) -> float:
     return total ** (252 / n_days) - 1
 
 
-def compute_all_metrics(returns: pd.Series, benchmark_returns: pd.Series | None = None) -> dict:
+def compute_all_metrics(returns: pd.Series, benchmark_returns: pd.Series | None = None, rf: float = RISK_FREE_RATE) -> dict:
     metrics = {
         "CAGR": cagr(returns),
         "Annualized Return": annualized_return(returns),
         "Annualized Volatility": annualized_volatility(returns),
-        "Sharpe Ratio": sharpe_ratio(returns),
-        "Sortino Ratio": sortino_ratio(returns),
-        "Calmar Ratio": calmar_ratio(returns),
+        "Sharpe Ratio": sharpe_ratio(returns, rf=rf),
+        "Sortino Ratio": sortino_ratio(returns, rf=rf),
+        "Calmar Ratio": calmar_ratio(returns, rf=rf),
         "Omega Ratio": omega_ratio(returns),
         "Max Drawdown": max_drawdown(returns),
         "CVaR (95%)": cvar(returns),
@@ -132,16 +126,16 @@ def compute_all_metrics(returns: pd.Series, benchmark_returns: pd.Series | None 
     if benchmark_returns is not None:
         beta = compute_beta(returns, benchmark_returns)
         metrics["Beta"] = beta
-        metrics["Treynor Ratio"] = treynor_ratio(returns, beta)
+        metrics["Treynor Ratio"] = treynor_ratio(returns, beta, rf=rf)
         metrics["Information Ratio"] = information_ratio(returns, benchmark_returns)
-        metrics["Alpha"] = annualized_return(returns) - (RISK_FREE_RATE + beta * (annualized_return(benchmark_returns) - RISK_FREE_RATE))
+        metrics["Alpha"] = annualized_return(returns) - (rf + beta * (annualized_return(benchmark_returns) - rf))
     return metrics
 
 
-def metrics_table(returns_dict: dict[str, pd.Series], benchmark_returns: pd.Series | None = None) -> pd.DataFrame:
+def metrics_table(returns_dict: dict[str, pd.Series], benchmark_returns: pd.Series | None = None, rf: float = RISK_FREE_RATE) -> pd.DataFrame:
     rows = {}
     for name, ret in returns_dict.items():
-        rows[name] = compute_all_metrics(ret, benchmark_returns)
+        rows[name] = compute_all_metrics(ret, benchmark_returns, rf=rf)
     df = pd.DataFrame(rows).T
     df.index.name = "Asset"
     return df
