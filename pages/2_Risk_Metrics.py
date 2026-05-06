@@ -228,13 +228,12 @@ with st.expander("Generate QuantStats Report"):
         with st.spinner("Generating QuantStats report..."):
             try:
                 tmpdir = tempfile.mkdtemp()
-                qs_out = os.path.join(tmpdir, "report.html")
-                quantstats_report(returns[report_ticker], benchmark=report_benchmark,
-                                  title=f"{report_ticker} Analysis")
-                src = f"{report_ticker.replace(' ', '_').replace('^', 'idx')}_report.html"
-                if os.path.exists(src):
-                    shutil.move(src, qs_out)
-                    with open(qs_out, "rb") as f:
+                outpath = quantstats_report(
+                    returns[report_ticker], benchmark=report_benchmark,
+                    title=f"{report_ticker} Analysis", output_dir=tmpdir,
+                )
+                if os.path.exists(outpath):
+                    with open(outpath, "rb") as f:
                         st.download_button("Download HTML Report", f,
                                            file_name=f"{report_ticker}_report.html",
                                            mime="text/html")

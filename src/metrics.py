@@ -102,7 +102,6 @@ def compute_beta(returns: pd.Series, benchmark_returns: pd.Series) -> float:
 def compute_all_metrics(returns: pd.Series, benchmark_returns: pd.Series | None = None, rf: float = RISK_FREE_RATE) -> dict:
     metrics = {
         "CAGR": cagr(returns),
-        "Annualized Return": annualized_return(returns),
         "Annualized Volatility": annualized_volatility(returns),
         "Sharpe Ratio": sharpe_ratio(returns, rf=rf),
         "Sortino Ratio": sortino_ratio(returns, rf=rf),
@@ -121,7 +120,7 @@ def compute_all_metrics(returns: pd.Series, benchmark_returns: pd.Series | None 
         metrics["Beta"] = beta
         metrics["Treynor Ratio"] = treynor_ratio(returns, beta, rf=rf)
         metrics["Information Ratio"] = information_ratio(returns, benchmark_returns)
-        metrics["Alpha"] = annualized_return(returns) - (rf + beta * (annualized_return(benchmark_returns) - rf))
+        metrics["Alpha"] = cagr(returns) - (rf + beta * (cagr(benchmark_returns) - rf))
     return metrics
 
 
@@ -134,5 +133,13 @@ def metrics_table(returns_dict: dict[str, pd.Series], benchmark_returns: pd.Seri
     return df
 
 
-def quantstats_report(returns: pd.Series, benchmark: str = "SPY", title: str = "Strategy") -> None:
-    qs.reports.html(returns, benchmark=benchmark, title=title, output=f"{title.replace(' ', '_')}_report.html")
+def quantstats_report(returns: pd.Series, benchmark: str = "SPY", title: str = "Strategy", output_dir: str | None = None) -> str:
+    import os
+    filename = f"{title.replace(' ', '_')}_report.html"
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        outpath = os.path.join(output_dir, filename)
+    else:
+        outpath = filename
+    qs.reports.html(returns, benchmark=benchmark, title=title, output=outpath)
+    return outpath

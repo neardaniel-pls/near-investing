@@ -68,7 +68,7 @@ def monte_carlo_statistics(paths: np.ndarray, confidence: float = 0.95) -> dict:
     sorted_final = np.sort(final_values)
     n = len(sorted_final)
     var_idx = int((1 - confidence) * n)
-    cvar_idx = var_idx
+    cvar_idx = max(1, var_idx)
 
     return {
         "Mean Final Value": np.mean(final_values),
@@ -99,12 +99,13 @@ def monte_carlo_return_stats(paths: np.ndarray, initial_value: float = 10000, co
         dd = (cumulative - running_max) / running_max
         max_drawdowns.append(dd.min())
 
+    var_cutoff = max(1, int((1 - confidence) * n))
     return {
         "Mean Return": np.mean(total_returns),
         "Median Return": np.median(total_returns),
         "Std Return": np.std(total_returns),
-        f"VaR ({confidence:.0%})": sorted_returns[int((1 - confidence) * n)],
-        f"CVaR ({confidence:.0%})": sorted_returns[:int((1 - confidence) * n)].mean(),
+        f"VaR ({confidence:.0%})": sorted_returns[var_cutoff],
+        f"CVaR ({confidence:.0%})": sorted_returns[:var_cutoff].mean(),
         "Worst Return": np.min(total_returns),
         "Best Return": np.max(total_returns),
         "Avg Max Drawdown": np.mean(max_drawdowns),

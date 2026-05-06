@@ -75,7 +75,7 @@ def walk_forward_test_returns(rolling_results: pd.DataFrame, prices: pd.DataFram
 
     if not all_rets:
         return pd.Series(dtype=float)
-    df = pd.DataFrame(all_rets).drop_duplicates(subset="date", keep="first").set_index("date")["return"]
+    df = pd.DataFrame(all_rets).drop_duplicates(subset="date", keep="last").set_index("date")["return"]
     df.name = "Walk-Forward"
     return df.sort_index()
 
