@@ -9,11 +9,12 @@ YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
 
 DEFAULT_CONFIG = {
     "tickers": ["AAPL", "VWCE.MI", "BTC-USD", "^GSPC"],
-    "start_date": "2018-01-01",
+    "start_date": "2010-01-01",
     "end_date": YESTERDAY,
     "risk_free_rate": 4.0,
     "initial_investment": 10000,
     "use_cache": True,
+    "ui_mode": "beginner",
 }
 
 
