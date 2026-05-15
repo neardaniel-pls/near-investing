@@ -345,34 +345,55 @@ def render_recommended_portfolio(prices, returns, tickers, rf):
         st.caption(f"Based on your last optimization: **{rec_label}**. Auto-loaded in Monte Carlo and Backtest.")
 
     from src.portfolio import build_portfolio_returns
-    from src.metrics import annualized_return, annualized_volatility, sharpe_ratio, max_drawdown
+    from src.metrics import (
+        annualized_return, annualized_volatility, sharpe_ratio,
+        max_drawdown, cagr, sortino_ratio, calmar_ratio,
+    )
 
     port_ret = build_portfolio_returns(prices, rec)
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric(label("Annualized Return"), f"{annualized_return(port_ret):.2%}")
-    with col2:
-        st.metric(label("Volatility"), f"{annualized_volatility(port_ret):.2%}")
-    with col3:
+    init_inv = st.session_state.get("initial_investment", 10000)
+    total_ret = (1 + port_ret).prod() - 1
+    gain = init_inv * total_ret
+    final_val = init_inv * (1 + total_ret)
+
+    kpi_cols = st.columns(4)
+    with kpi_cols[0]:
+        st.metric(label("Total Return"), f"${gain:+,.0f}", delta=f"{total_ret:.2%}")
+    with kpi_cols[1]:
+        st.metric(label("CAGR"), f"{cagr(port_ret):.2%}")
+    with kpi_cols[2]:
         st.metric(label("Sharpe Ratio"), f"{sharpe_ratio(port_ret, rf=rf):.3f}")
-    with col4:
+    with kpi_cols[3]:
         st.metric(label("Max Drawdown"), f"{max_drawdown(port_ret):.2%}", delta_color="inverse")
+
+    kpi_cols2 = st.columns(4)
+    with kpi_cols2[0]:
+        st.metric(label("Volatility"), f"{annualized_volatility(port_ret):.2%}")
+    with kpi_cols2[1]:
+        st.metric(label("Sortino Ratio"), f"{sortino_ratio(port_ret, rf=rf):.3f}")
+    with kpi_cols2[2]:
+        st.metric(label("Calmar Ratio"), f"{calmar_ratio(port_ret, rf=rf):.3f}")
+    with kpi_cols2[3]:
+        st.metric("Final Value", f"${final_val:,.0f}", delta=f"on ${init_inv:,.0f} initial")
+
+    st.markdown("---")
+    section_title("Optimal Allocation")
 
     nonzero = {k: v for k, v in rec.items() if v > 0.001}
     col_alloc, col_chart = st.columns([1, 1])
     with col_alloc:
         for t, w in sorted(nonzero.items(), key=lambda x: -x[1]):
-            bar_len = int(w * 30)
-            st.markdown(f"**{t}**: {w:.2%} `{'\u2588' * bar_len}`")
+            bar_len = int(w * 40)
+            st.markdown(f"**{t}**: {w:.2%}  {'\u2588' * bar_len}")
     with col_chart:
         if nonzero:
             from src.charts import make_pie_chart
             fig = make_pie_chart(
                 labels=list(nonzero.keys()),
                 values=[v * 100 for v in nonzero.values()],
-                height=280,
+                height=320,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="recommended_pie")
 
 
 def load_sample_portfolio():

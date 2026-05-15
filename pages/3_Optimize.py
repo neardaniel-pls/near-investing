@@ -106,9 +106,9 @@ tab_single, tab_all, tab_bl, tab_frontier = st.tabs(tab_labels)
 
 with tab_single:
     section_title("Choose Optimization Target")
-    col1, col2 = st.columns([1, 2])
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 1])
 
-    with col1:
+    with ctrl_col1:
         opt_label = "Optimize for" if not is_beginner() else "What do you want?"
         desc_dict = TARGET_BEGINNER if is_beginner() else TARGET_DESCRIPTIONS
         target = st.selectbox(
@@ -122,6 +122,7 @@ with tab_single:
             else TARGET_DESCRIPTIONS.get(target, "")
         st.info(f"**{target}**: {current_desc}")
 
+    with ctrl_col2:
         target_value = None
         if target == "efficient_return":
             mu = compute_expected_returns(prices)
@@ -133,36 +134,76 @@ with tab_single:
             risk_label = "Target annual volatility (%)" if not is_beginner() else "Max price swings you can handle (%)"
             target_value = st.slider(risk_label, 5.0, 50.0, 20.0, step=0.5) / 100
 
+    with ctrl_col3:
         opt_btn_label = "Optimize" if not is_beginner() else "Find Best Mix"
-        if st.button(opt_btn_label, type="primary"):
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        if st.button(opt_btn_label, type="primary", use_container_width=True):
             with st.spinner("Optimizing..."):
                 if target == "hrp":
                     w = optimize_portfolio(prices, target="hrp")
                 else:
-                    w = optimize_portfolio(prices, target=target, target_value=target_value, risk_free_rate=rf)
+                    w = optimize_portfolio(prices, target=target, target_value=target_value, risk_free_rate=rf, risk_aversion=5)
                 st.session_state["opt_weights"] = w
                 save_recommended_weights(w, f"Single: {target}")
                 st.toast(f"Optimization complete: {target}", icon="\u2705")
 
-        if "opt_weights" in st.session_state:
-            w = st.session_state["opt_weights"]
-            section_title("Optimal Weights")
+    if "opt_weights" in st.session_state:
+        w = st.session_state["opt_weights"]
+
+        divider()
+        section_title("Optimal Allocation")
+
+        weights_col, pie_col = st.columns([1, 1])
+        with weights_col:
             for t, weight in sorted(w.items(), key=lambda x: -x[1]):
                 if abs(weight) > 0.001:
-                    bar_len = int(weight * 30)
-                    st.markdown(f"**{t}**: {weight:.2%} `{'\u2588' * bar_len}`")
-
-    with col2:
-        if "opt_weights" in st.session_state:
-            w = st.session_state["opt_weights"]
+                    bar_len = int(weight * 40)
+                    st.markdown(f"**{t}**: {weight:.2%}  {'\u2588' * bar_len}")
+        with pie_col:
             nonzero = {k: v for k, v in w.items() if v > 0.001}
             if nonzero:
-                 fig = make_pie_chart(
-                     labels=list(nonzero.keys()),
-                     values=[v * 100 for v in nonzero.values()],
-                     height=400,
-                 )
-                 st.plotly_chart(fig, use_container_width=True)
+                fig = make_pie_chart(
+                    labels=list(nonzero.keys()),
+                    values=[v * 100 for v in nonzero.values()],
+                    height=320,
+                )
+                st.plotly_chart(fig, use_container_width=True, key="single_target_pie")
+
+        divider()
+        section_title("Portfolio Performance")
+
+        init_inv = st.session_state.get("initial_investment", 10000)
+        port_ret = build_portfolio_returns(prices, w)
+        from src.metrics import annualized_return, annualized_volatility, sharpe_ratio, max_drawdown, cagr, sortino_ratio, calmar_ratio
+        total_ret = (1 + port_ret).prod() - 1
+        gain = init_inv * total_ret
+        port_cagr = cagr(port_ret)
+        port_vol = annualized_volatility(port_ret)
+        port_sharpe = sharpe_ratio(port_ret, rf=rf)
+        port_mdd = max_drawdown(port_ret)
+        port_sortino = sortino_ratio(port_ret, rf=rf)
+        port_calmar = calmar_ratio(port_ret, rf=rf)
+        final_val = init_inv * (1 + total_ret)
+
+        kpi_cols = st.columns(4)
+        with kpi_cols[0]:
+            st.metric(label("Total Return"), f"${gain:+,.0f}", delta=f"{total_ret:.2%}")
+        with kpi_cols[1]:
+            st.metric(label("CAGR"), f"{port_cagr:.2%}")
+        with kpi_cols[2]:
+            st.metric(label("Sharpe Ratio"), f"{port_sharpe:.3f}")
+        with kpi_cols[3]:
+            st.metric(label("Max Drawdown"), f"{port_mdd:.2%}", delta_color="inverse")
+
+        kpi_cols2 = st.columns(4)
+        with kpi_cols2[0]:
+            st.metric(label("Volatility"), f"{port_vol:.2%}")
+        with kpi_cols2[1]:
+            st.metric(label("Sortino Ratio"), f"{port_sortino:.3f}")
+        with kpi_cols2[2]:
+            st.metric(label("Calmar Ratio"), f"{port_calmar:.3f}")
+        with kpi_cols2[3]:
+            st.metric("Final Value", f"${final_val:,.0f}", delta=f"on ${init_inv:,.0f} initial")
 
 with tab_all:
     section_title("All Optimization Strategies Compared")
@@ -171,11 +212,25 @@ with tab_all:
     else:
         st.caption("Run every strategy at once and compare their suggested allocations and performance.")
 
-    if "all_strategies" not in st.session_state or st.button("Re-run All Strategies"):
-        with st.spinner("Running all strategies..."):
-            all_strategies = optimize_all_strategies(prices, risk_free_rate=rf)
-            st.session_state["all_strategies"] = all_strategies
-            st.toast("All strategies computed!", icon="\u2705")
+    ra_col1, ra_col2 = st.columns([3, 1])
+    with ra_col1:
+        ra_help = "Higher = more conservative (penalizes risk more). Lower = more aggressive." if not is_beginner() \
+            else "Higher = safer. Lower = riskier but potentially more reward."
+        risk_aversion = st.slider(
+            "Risk aversion" if not is_beginner() else "Risk tolerance (higher = safer)",
+            min_value=1, max_value=20, value=5, step=1,
+            help=ra_help,
+        )
+    with ra_col2:
+        if st.button("Re-run All Strategies", type="primary", use_container_width=True):
+            with st.spinner("Running all strategies..."):
+                all_strategies = optimize_all_strategies(prices, risk_free_rate=rf, risk_aversion=risk_aversion)
+                st.session_state["all_strategies"] = all_strategies
+                st.toast("All strategies computed!", icon="\u2705")
+
+    if "all_strategies" not in st.session_state:
+        st.info("Click **Re-run All Strategies** to start.")
+        st.stop()
 
     if "all_strategies" in st.session_state:
         all_s = st.session_state["all_strategies"]
@@ -186,23 +241,19 @@ with tab_all:
         optimized["Equal Weight"] = build_portfolio_returns(prices, {t: 1.0 / len(tickers) for t in tickers})
         table = metrics_table(optimized, rf=rf)
 
-        rank_col1, rank_col2 = st.columns(2)
+        rank_col1, rank_col2 = st.columns([1, 1])
         with rank_col1:
             rank_label = "Rank strategies by" if not is_beginner() else "Rank by"
             rank_metric = st.selectbox(rank_label, [
                 "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
-                "Annualized Return", "CAGR", "Annualized Volatility", "Max Drawdown",
-                "CVaR (95%)",
+                "CAGR", "Annualized Volatility", "Max Drawdown",
+                "CVaR (95%)", "Skewness", "Kurtosis", "Avg Daily Return",
             ], index=0, key="rank_metric")
         with rank_col2:
             rank_direction = "higher" if rank_metric in [
                 "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
-                "Annualized Return", "CAGR",
+                "CAGR", "Skewness", "Avg Daily Return",
             ] else "lower"
-            if is_beginner():
-                st.info(f"**{'Higher' if rank_direction == 'higher' else 'Lower'} is better**")
-            else:
-                st.info(f"**{rank_direction} is better** for {rank_metric}")
 
         ranked = table[rank_metric].sort_values(ascending=(rank_direction == "lower"))
         best_name = ranked.index[0]
@@ -217,10 +268,31 @@ with tab_all:
         else:
             st.caption("This strategy's weights have been saved as the recommended portfolio (used in Monte Carlo & Backtest).")
 
-        st.markdown("**Ranking:**")
+        fig = go.Figure()
+        bar_colors = []
         for i, (name, val) in enumerate(ranked.items()):
-            medal = {0: " \U0001f947", 1: " \U0001f948", 2: " \U0001f949"}.get(i, "")
-            st.markdown(f"{i+1}. **{name}** \u2014 {rank_metric}: `{val:.4f}`{medal}")
+            if i == 0:
+                bar_colors.append("rgba(0,212,170,0.9)")
+            elif i == 1:
+                bar_colors.append("rgba(0,212,170,0.5)")
+            elif i == 2:
+                bar_colors.append("rgba(0,212,170,0.3)")
+            else:
+                bar_colors.append("rgba(100,100,130,0.3)")
+        fig.add_trace(go.Bar(
+            y=ranked.index[::-1],
+            x=ranked.values[::-1],
+            orientation="h",
+            marker_color=bar_colors[::-1],
+            text=[f"{v:.4f}" for v in ranked.values[::-1]],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            xaxis_title=rank_metric,
+            margin=dict(l=160, r=80, t=20, b=40),
+        )
+        apply_theme(fig, height=max(300, len(ranked) * 36 + 80))
+        st.plotly_chart(fig, use_container_width=True, key="ranking_bar")
 
         divider()
         section_title("Full Metrics")

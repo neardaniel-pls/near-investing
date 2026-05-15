@@ -43,6 +43,7 @@ def optimize_portfolio(
     view_confidences: list[float] | None = None,
     risk_free_rate: float = 0.04,
     market_caps: dict[str, float] | None = None,
+    risk_aversion: float = 1,
 ) -> dict[str, float]:
     mu = compute_expected_returns(prices)
     S = compute_covariance(prices)
@@ -62,7 +63,7 @@ def optimize_portfolio(
 
     elif target == "max_quadratic_utility":
         ef = EfficientFrontier(mu, S)
-        ef.max_quadratic_utility(risk_aversion=1)
+        ef.max_quadratic_utility(risk_aversion=risk_aversion)
         return dict(ef.clean_weights())
 
     elif target == "efficient_return":
@@ -308,7 +309,7 @@ def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float
     return points
 
 
-def optimize_all_strategies(prices: pd.DataFrame, risk_free_rate: float = 0.04) -> dict[str, dict[str, float]]:
+def optimize_all_strategies(prices: pd.DataFrame, risk_free_rate: float = 0.04, risk_aversion: float = 1) -> dict[str, dict[str, float]]:
     results = {}
     strategies = [
         ("Max Sharpe", "max_sharpe"),
@@ -327,7 +328,7 @@ def optimize_all_strategies(prices: pd.DataFrame, risk_free_rate: float = 0.04) 
             if name == "Kelly Criterion":
                 results[name] = kelly_criterion(prices)
             else:
-                results[name] = optimize_portfolio(prices, target=target, risk_free_rate=risk_free_rate)
+                results[name] = optimize_portfolio(prices, target=target, risk_free_rate=risk_free_rate, risk_aversion=risk_aversion)
         except Exception:
             logging.warning("Failed to optimize strategy: %s", name)
             results[name] = {t: 0.0 for t in prices.columns}

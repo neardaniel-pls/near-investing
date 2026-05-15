@@ -474,7 +474,7 @@ with tab_rolling:
                     for i, col in enumerate(curves.columns):
                         fig.add_trace(go.Scatter(x=curves.index, y=curves[col], name=col, mode="lines",
                                                  line=dict(color=colors[i])))
-                    fig.update_layout(yaxis_title="Weight %", xaxis_title="Date")
+                    fig.update_layout(yaxis_title="Value ($)", xaxis_title="Date")
                     apply_theme(fig, height=500)
                     st.plotly_chart(fig, use_container_width=True)
 
