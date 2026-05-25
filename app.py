@@ -19,14 +19,28 @@ init_shared_state()
 
 PRESET_TICKERS = {
     "Balanced Mix": ["AAPL", "MSFT", "VWCE.MI", "AGGH.AS", "BTC-USD", "^GSPC"],
+    "Long History (EU)": ["IWDA.AS", "EUNL.DE", "^GSPC", "^STOXX50E", "GLD", "XEON.DE"],
     "US Tech Giants": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"],
     "Dividend & Value": ["VHYL.AS", "FUSD.DE", "BRK-B", "JPM", "PG", "KO"],
     "European ETFs": ["VWCE.MI", "SXR8.DE", "IWDA.AS", "AGGH.AS", "XDWL.DE", "MEUD.PA"],
-    "All-World ETFs": ["VWCE.MI", "VWRL.L", "IWDA.AS", "EUNL.DE", "WEBN.MI"],
+    "All-World ETFs": ["VWCE.MI", "VWRL.L", "IWDA.AS", "EUNL.DE"],
     "Crypto": ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "AVAX-USD"],
     "60/40 Classic": ["VWCE.MI", "AGGH.AS", "^GSPC"],
     "Golden Butterfly": ["VWCE.MI", "EUNL.DE", "AGGH.AS", "SGLN.L", "XEON.DE"],
     "Custom": [],
+}
+
+PRESET_SUGGESTED_START = {
+    "Balanced Mix": "2019-06-01",
+    "Long History (EU)": "2010-01-01",
+    "US Tech Giants": "2010-01-01",
+    "Dividend & Value": "2020-01-01",
+    "European ETFs": "2019-06-01",
+    "All-World ETFs": "2013-01-01",
+    "Crypto": "2020-01-01",
+    "60/40 Classic": "2019-06-01",
+    "Golden Butterfly": "2019-06-01",
+    "Custom": None,
 }
 
 cfg = load_config()
@@ -53,6 +67,9 @@ with st.sidebar:
         )
 
         yesterday = pd.Timestamp.now().normalize() - pd.Timedelta(days=1)
+        suggested = PRESET_SUGGESTED_START.get(preset)
+        if suggested and preset != "Custom":
+            st.caption(f"\U0001f4c5 Suggested start date for this preset: **{suggested}**")
         col1, col2 = st.columns(2)
         start_date = col1.date_input("Start", value=pd.Timestamp(cfg.get("start_date", "2010-01-01")))
         end_date = col2.date_input("End", value=yesterday)
@@ -128,6 +145,20 @@ if fetch_btn:
     returns = compute_returns(prices)
     with st.spinner("Resolving ticker names..."):
         ticker_names = fetch_ticker_names(tickers)
+
+    # Data availability warning
+    requested_start = pd.Timestamp(start_date)
+    truncated = []
+    for col in prices.columns:
+        first_valid = prices[col].first_valid_index()
+        if first_valid is not None and first_valid > requested_start:
+            truncated.append((col, first_valid.strftime("%Y-%m-%d")))
+    if truncated:
+        truncated_msgs = [f"**{t}** \u2192 data starts {d}" for t, d in truncated]
+        earliest_common = prices.dropna(how="any").index[0] if not prices.dropna(how="any").empty else None
+        suggestion = f"\n\nSet start date to **{earliest_common.strftime('%Y-%m-%d')}** to include all tickers." if earliest_common else ""
+        st.warning("\u26a0\ufe0f Some tickers have less history than requested:\n\n" + "\n".join(truncated_msgs) + suggestion)
+
     st.session_state["prices"] = prices
     st.session_state["returns"] = returns
     st.session_state["tickers"] = tickers

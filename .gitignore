@@ -4,9 +4,44 @@ __pycache__/
 *.pyo
 data/cache/
 data/user_config.json
+data/prices.parquet
+data/returns.parquet
+reports/
 .streamlit/secrets.toml
 *_report.html
 .ipynb_checkpoints/
+
+# OS generated
 .DS_Store
-.kilo
 Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup/temp files
+*.bak
+*.old
+*.orig
+*.tmp
+*.log
+tmp/
+temp/
+
+# Security
+*.key
+*.pem
+*.crt
+*.p12
+.env
+.secrets/
+
+# Internal planning
+ideas.md
+PLAN.md
+
+# Kilo
+.kilo/

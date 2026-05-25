@@ -15,6 +15,10 @@ from src.optimization import (
 )
 from src.portfolio import build_portfolio_returns, compare_portfolios
 from src.metrics import metrics_table
+from src.metrics import (
+    annualized_return, annualized_volatility, sharpe_ratio,
+    max_drawdown, cagr, sortino_ratio, calmar_ratio,
+)
 from src.ui import (
     init_shared_state, require_data, render_workflow_stepper,
     render_next_button, render_portfolio_info, save_recommended_weights,
@@ -99,10 +103,285 @@ with st.expander("\u2753 What is portfolio optimization?" if not is_beginner() e
         - **Black-Litterman** \u2014 Incorporate personal views into market equilibrium
         """)
 
-tab_labels = ["Single Target", "Compare All", "Black-Litterman & Kelly", "Efficient Frontier"]
+tab_labels = ["All Strategies", "Single Strategy", "Custom Views & Sizing"]
 if is_beginner():
-    tab_labels = ["One Strategy", "Compare All", "Custom Views & Sizing", "Risk vs Return Curve"]
-tab_single, tab_all, tab_bl, tab_frontier = st.tabs(tab_labels)
+    tab_labels = ["Compare All", "One Strategy", "Custom Views & Sizing"]
+tab_all, tab_single, tab_bl = st.tabs(tab_labels)
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 1: ALL STRATEGIES (default landing)
+# ═══════════════════════════════════════════════════════════════════
+
+with tab_all:
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 2, 1])
+
+    with ctrl_col1:
+        if is_beginner():
+            ra_help = (
+                "Controls how much the optimizer avoids risk.\n\n"
+                "**1 \u2013 2 (Aggressive):** Concentrates on highest returns, may put everything in one asset.\n"
+                "**3 \u2013 5 (Moderate):** Balances growth and diversification. Good starting point.\n"
+                "**6 \u2013 10 (Conservative):** Prioritizes stability, more spread across assets.\n"
+                "**10 \u2013 20 (Very Conservative):** Heavily penalizes risk, tends toward equal-weight or min-volatility."
+            )
+        else:
+            ra_help = (
+                "Controls the risk penalty in quadratic utility: U = return \u2013 (ra/2) \u00d7 risk\u00b2.\n\n"
+                "**1 \u2013 2:** Nearly unconstrained \u2014 optimizer maximizes return, often concentrates in one asset.\n"
+                "**3 \u2013 5:** Balanced \u2014 diversifies but still favors higher-return assets.\n"
+                "**6 \u2013 10:** Conservative \u2014 significant risk penalty, more evenly distributed weights.\n"
+                "**10 \u2013 20:** Very conservative \u2014 approaches equal-weight or min-volatility allocations.\n\n"
+                "Note: Only affects strategies that use risk aversion (Max Quadratic Utility). Other strategies (Max Sharpe, Min Vol, HRP, etc.) are unaffected."
+            )
+        risk_aversion = st.slider(
+            "Risk aversion" if not is_beginner() else "Risk tolerance (higher = safer)",
+            min_value=1, max_value=20, value=5, step=1,
+            help=ra_help,
+        )
+
+    with ctrl_col2:
+        rank_label = "Rank strategies by" if not is_beginner() else "Rank by"
+        rank_metric = st.selectbox(rank_label, [
+            "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
+            "CAGR", "Annualized Volatility", "Max Drawdown",
+            "CVaR (95%)", "Skewness", "Kurtosis", "Avg Daily Return",
+        ], index=0, key="rank_metric")
+
+    with ctrl_col3:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        rerun = st.button("Re-run All", type="primary", use_container_width=True)
+
+    need_run = "all_strategies" not in st.session_state or rerun
+    if "last_risk_aversion" in st.session_state and st.session_state["last_risk_aversion"] != risk_aversion:
+        need_run = True
+    st.session_state["last_risk_aversion"] = risk_aversion
+    if need_run:
+        with st.spinner("Running all strategies..."):
+            all_strategies = optimize_all_strategies(prices, risk_free_rate=rf, risk_aversion=risk_aversion)
+            st.session_state["all_strategies"] = all_strategies
+            if rerun:
+                st.toast("All strategies recomputed!", icon="\u2705")
+
+    all_s = st.session_state["all_strategies"]
+
+    optimized = {}
+    for name, w in all_s.items():
+        optimized[name] = build_portfolio_returns(prices, w)
+    optimized["Equal Weight"] = build_portfolio_returns(prices, {t: 1.0 / len(tickers) for t in tickers})
+    table = metrics_table(optimized, rf=rf)
+
+    rank_direction = "higher" if rank_metric in [
+        "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
+        "CAGR", "Skewness", "Avg Daily Return",
+    ] else "lower"
+
+    ranked = table[rank_metric].sort_values(ascending=(rank_direction == "lower"))
+    best_name = ranked.index[0]
+    best_val = ranked.iloc[0]
+
+    if best_name in all_s:
+        save_recommended_weights(all_s[best_name], f"Compare All: {best_name} ({rank_metric}={best_val:.4f})")
+
+    # --- RANKING BAR CHART ---
+    section_title("\U0001f3c6 Strategy Ranking")
+    st.success(f"**Best: {best_name}** \u2014 {rank_metric}: {best_val:.4f}")
+    if is_beginner():
+        st.caption("This strategy's weights have been saved for use in simulations.")
+    else:
+        st.caption("This strategy's weights have been saved as the recommended portfolio (used in Monte Carlo & Backtest).")
+
+    fig = go.Figure()
+    bar_colors = []
+    for i, (name, val) in enumerate(ranked.items()):
+        if i == 0:
+            bar_colors.append("rgba(0,212,170,0.9)")
+        elif i == 1:
+            bar_colors.append("rgba(0,212,170,0.5)")
+        elif i == 2:
+            bar_colors.append("rgba(0,212,170,0.3)")
+        else:
+            bar_colors.append("rgba(100,100,130,0.3)")
+    fig.add_trace(go.Bar(
+        y=ranked.index[::-1],
+        x=ranked.values[::-1],
+        orientation="h",
+        marker_color=bar_colors[::-1],
+        text=[f"{v:.4f}" for v in ranked.values[::-1]],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        xaxis_title=rank_metric,
+        margin=dict(l=160, r=80, t=20, b=40),
+    )
+    apply_theme(fig, height=max(300, len(ranked) * 36 + 80))
+    st.plotly_chart(fig, use_container_width=True, key="ranking_bar")
+
+    # --- BEST STRATEGY SPOTLIGHT ---
+    if best_name in all_s or best_name == "Equal Weight":
+        divider()
+        best_w = all_s.get(best_name, {t: 1.0 / len(tickers) for t in tickers})
+
+        section_title(f"\u2b50 Best Strategy: {best_name}")
+
+        best_ret = build_portfolio_returns(prices, best_w)
+        init_inv = st.session_state.get("initial_investment", 10000)
+        total_ret = (1 + best_ret).prod() - 1
+        gain = init_inv * total_ret
+        final_val = init_inv * (1 + total_ret)
+
+        kpi_cols = st.columns(4)
+        with kpi_cols[0]:
+            st.metric(label("Total Return"), f"${gain:+,.0f}", delta=f"{total_ret:.2%}")
+        with kpi_cols[1]:
+            st.metric(label("CAGR"), f"{cagr(best_ret):.2%}")
+        with kpi_cols[2]:
+            st.metric(label("Sharpe Ratio"), f"{sharpe_ratio(best_ret, rf=rf):.3f}")
+        with kpi_cols[3]:
+            st.metric(label("Max Drawdown"), f"{max_drawdown(best_ret):.2%}", delta_color="inverse")
+
+        alloc_col, pie_col = st.columns([1, 1])
+        with alloc_col:
+            nonzero = {k: v for k, v in sorted(best_w.items(), key=lambda x: -x[1]) if v > 0.001}
+            for t, w in nonzero.items():
+                bar_len = int(w * 40)
+                st.markdown(f"**{t}**: {w:.2%}  {'\u2588' * bar_len}")
+        with pie_col:
+            if nonzero:
+                fig = make_pie_chart(
+                    labels=list(nonzero.keys()),
+                    values=[v * 100 for v in nonzero.values()],
+                    height=320,
+                )
+                st.plotly_chart(fig, use_container_width=True, key="best_spotlight_pie")
+
+    # --- EFFICIENT FRONTIER ---
+    divider()
+    section_title("Efficient Frontier")
+    if is_beginner():
+        st.caption("The curve shows the best possible return for each level of risk. "
+                    "Dots are your investments. Anything below the curve could be improved.")
+    else:
+        st.caption("The curved line shows the best possible return for each risk level. "
+                    "Individual assets are dots; optimal strategy points are marked with symbols.")
+
+    ef_ctrl1, ef_ctrl2 = st.columns(2)
+    with ef_ctrl1:
+        color_metric = st.selectbox("Color strategy points by", [
+            "sharpe", "sortino", "calmar", "omega", "max_drawdown", "cvar",
+        ], index=0, format_func=lambda x: {
+            "sharpe": "Sharpe Ratio", "sortino": "Sortino Ratio",
+            "calmar": "Calmar Ratio", "omega": "Omega Ratio",
+            "max_drawdown": "Max Drawdown", "cvar": "CVaR (95%)",
+        }[x], key="ef_color_metric")
+    with ef_ctrl2:
+        all_strategy_names = ["Max Sharpe", "Min Volatility", "Min CVaR", "Min Semivariance",
+                              "Semivariance Utility", "Max Quadratic Utility", "HRP", "Kelly Criterion"]
+        show_strategies = st.multiselect(
+            "Show optimal points",
+            all_strategy_names,
+            default=["Max Sharpe", "Min Volatility", "HRP"],
+            key="ef_show_strategies",
+        )
+
+    with st.spinner("Computing efficient frontier..."):
+        frontier_rets, frontier_risks, max_sharpe_pt, min_vol_pt, strategy_points = efficient_frontier_data(prices, risk_free_rate=rf)
+        mu = compute_expected_returns(prices)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=frontier_risks, y=frontier_rets, mode="lines",
+        name="Efficient Frontier", line=dict(width=3, color="#00d4aa"),
+    ))
+
+    markers = {
+        "Max Sharpe": dict(symbol="star", color="green"),
+        "Min Volatility": dict(symbol="diamond", color="red"),
+        "Min CVaR": dict(symbol="hexagon", color="purple"),
+        "Min Semivariance": dict(symbol="square", color="orange"),
+        "Semivariance Utility": dict(symbol="triangle-up", color="teal"),
+        "Max Quadratic Utility": dict(symbol="cross", color="brown"),
+        "HRP": dict(symbol="pentagon", color="magenta"),
+        "Kelly Criterion": dict(symbol="x", color="navy"),
+    }
+
+    for name in show_strategies:
+        if name in strategy_points:
+            pt = strategy_points[name]
+            m = markers.get(name, dict(symbol="circle", color="gray"))
+            metric_val = pt.get(color_metric, 0)
+            fig.add_trace(go.Scatter(
+                x=[pt["risk"]], y=[pt["return"]], mode="markers+text",
+                name=f"{name} ({color_metric}: {metric_val:.3f})",
+                marker=dict(size=14, symbol=m["symbol"], color=m["color"]),
+                text=[name], textposition="top center",
+            ))
+
+    colors = chart_colors(len(prices.columns))
+    for i, t in enumerate(prices.columns):
+        ann_vol = returns[t].std() * np.sqrt(252)
+        ann_ret = mu.get(t, 0)
+        fig.add_trace(go.Scatter(
+            x=[ann_vol], y=[ann_ret], mode="markers+text", name=t,
+            text=[t], textposition="top center",
+            marker=dict(size=10, color=colors[i]),
+        ))
+    fig.update_layout(
+        xaxis_title="Annualized Volatility", yaxis_title="Annualized Expected Return",
+    )
+    apply_theme(fig, height=600)
+    st.plotly_chart(fig, use_container_width=True, key="all_strategies_frontier")
+
+    if strategy_points:
+        summary = {}
+        for name, pt in strategy_points.items():
+            summary[name] = {
+                "Return": f"{pt['return']:.2%}",
+                "Risk": f"{pt['risk']:.2%}",
+                "Sharpe": f"{pt['sharpe']:.3f}",
+                "Sortino": f"{pt['sortino']:.3f}",
+                "Calmar": f"{pt['calmar']:.3f}",
+                "Omega": f"{pt['omega']:.3f}",
+                "Max DD": f"{pt['max_drawdown']:.2%}",
+                "CVaR": f"{pt['cvar']:.4f}",
+            }
+        with st.expander("\U0001f4ca Strategy Point Details"):
+            st.dataframe(pd.DataFrame(summary), use_container_width=True, height=300)
+
+    # --- DETAIL EXPANDERS ---
+    with st.expander("\U0001f4ca Allocation Comparison"):
+        weights_data = {}
+        for name, weights in all_s.items():
+            sorted_w = sorted(weights.items(), key=lambda x: x[0])
+            weights_data[name] = [w * 100 for _, w in sorted_w]
+
+        fig = make_bar_chart(
+            categories=[t for t, _ in sorted_w],
+            values_dict=weights_data,
+            y_title="Weight %",
+            height=600,
+        )
+        st.plotly_chart(fig, use_container_width=True, key="alloc_comparison_bars")
+
+    with st.expander("\U0001f4cb Full Metrics Table"):
+        table.index.name = "Strategy"
+        styled = format_dataframe_styler(table)
+        st.dataframe(styled, use_container_width=True, height=400)
+        render_export_section(table, "optimization_comparison.csv", key="opt_comparison")
+
+    with st.expander("\U0001f4c8 Equity Curves"):
+        st.caption("How $10k would have grown under each strategy's allocation.")
+        curves = compare_portfolios(optimized, initial_value=10000)
+        fig = go.Figure()
+        colors = chart_colors(len(curves.columns))
+        for i, col in enumerate(curves.columns):
+            fig.add_trace(go.Scatter(x=curves.index, y=curves[col], name=col, mode="lines",
+                                     line=dict(color=colors[i])))
+        apply_theme(fig, height=500)
+        st.plotly_chart(fig, use_container_width=True, key="all_equity_curves")
+
+# ═══════════════════════════════════════════════════════════════════
+# TAB 2: SINGLE STRATEGY
+# ═══════════════════════════════════════════════════════════════════
 
 with tab_single:
     section_title("Choose Optimization Target")
@@ -174,7 +453,6 @@ with tab_single:
 
         init_inv = st.session_state.get("initial_investment", 10000)
         port_ret = build_portfolio_returns(prices, w)
-        from src.metrics import annualized_return, annualized_volatility, sharpe_ratio, max_drawdown, cagr, sortino_ratio, calmar_ratio
         total_ret = (1 + port_ret).prod() - 1
         gain = init_inv * total_ret
         port_cagr = cagr(port_ret)
@@ -205,126 +483,9 @@ with tab_single:
         with kpi_cols2[3]:
             st.metric("Final Value", f"${final_val:,.0f}", delta=f"on ${init_inv:,.0f} initial")
 
-with tab_all:
-    section_title("All Optimization Strategies Compared")
-    if is_beginner():
-        st.caption("Run every strategy and see which one gives the best results.")
-    else:
-        st.caption("Run every strategy at once and compare their suggested allocations and performance.")
-
-    ra_col1, ra_col2 = st.columns([3, 1])
-    with ra_col1:
-        ra_help = "Higher = more conservative (penalizes risk more). Lower = more aggressive." if not is_beginner() \
-            else "Higher = safer. Lower = riskier but potentially more reward."
-        risk_aversion = st.slider(
-            "Risk aversion" if not is_beginner() else "Risk tolerance (higher = safer)",
-            min_value=1, max_value=20, value=5, step=1,
-            help=ra_help,
-        )
-    with ra_col2:
-        if st.button("Re-run All Strategies", type="primary", use_container_width=True):
-            with st.spinner("Running all strategies..."):
-                all_strategies = optimize_all_strategies(prices, risk_free_rate=rf, risk_aversion=risk_aversion)
-                st.session_state["all_strategies"] = all_strategies
-                st.toast("All strategies computed!", icon="\u2705")
-
-    if "all_strategies" not in st.session_state:
-        st.info("Click **Re-run All Strategies** to start.")
-        st.stop()
-
-    if "all_strategies" in st.session_state:
-        all_s = st.session_state["all_strategies"]
-
-        optimized = {}
-        for name, w in all_s.items():
-            optimized[name] = build_portfolio_returns(prices, w)
-        optimized["Equal Weight"] = build_portfolio_returns(prices, {t: 1.0 / len(tickers) for t in tickers})
-        table = metrics_table(optimized, rf=rf)
-
-        rank_col1, rank_col2 = st.columns([1, 1])
-        with rank_col1:
-            rank_label = "Rank strategies by" if not is_beginner() else "Rank by"
-            rank_metric = st.selectbox(rank_label, [
-                "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
-                "CAGR", "Annualized Volatility", "Max Drawdown",
-                "CVaR (95%)", "Skewness", "Kurtosis", "Avg Daily Return",
-            ], index=0, key="rank_metric")
-        with rank_col2:
-            rank_direction = "higher" if rank_metric in [
-                "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
-                "CAGR", "Skewness", "Avg Daily Return",
-            ] else "lower"
-
-        ranked = table[rank_metric].sort_values(ascending=(rank_direction == "lower"))
-        best_name = ranked.index[0]
-        best_val = ranked.iloc[0]
-
-        if best_name in all_s:
-            save_recommended_weights(all_s[best_name], f"Compare All: {best_name} ({rank_metric}={best_val:.4f})")
-
-        st.success(f"\U0001f3c6 **Best: {best_name}** \u2014 {rank_metric}: {best_val:.4f}")
-        if is_beginner():
-            st.caption("This strategy's weights have been saved for use in simulations.")
-        else:
-            st.caption("This strategy's weights have been saved as the recommended portfolio (used in Monte Carlo & Backtest).")
-
-        fig = go.Figure()
-        bar_colors = []
-        for i, (name, val) in enumerate(ranked.items()):
-            if i == 0:
-                bar_colors.append("rgba(0,212,170,0.9)")
-            elif i == 1:
-                bar_colors.append("rgba(0,212,170,0.5)")
-            elif i == 2:
-                bar_colors.append("rgba(0,212,170,0.3)")
-            else:
-                bar_colors.append("rgba(100,100,130,0.3)")
-        fig.add_trace(go.Bar(
-            y=ranked.index[::-1],
-            x=ranked.values[::-1],
-            orientation="h",
-            marker_color=bar_colors[::-1],
-            text=[f"{v:.4f}" for v in ranked.values[::-1]],
-            textposition="outside",
-        ))
-        fig.update_layout(
-            xaxis_title=rank_metric,
-            margin=dict(l=160, r=80, t=20, b=40),
-        )
-        apply_theme(fig, height=max(300, len(ranked) * 36 + 80))
-        st.plotly_chart(fig, use_container_width=True, key="ranking_bar")
-
-        divider()
-        section_title("Full Metrics")
-
-        weights_data = {}
-        for name, weights in all_s.items():
-            sorted_w = sorted(weights.items(), key=lambda x: x[0])
-            weights_data[name] = [w * 100 for _, w in sorted_w]
-
-        fig = make_bar_chart(
-            categories=[t for t, _ in sorted_w],
-            values_dict=weights_data,
-            y_title="Weight %",
-            height=600,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        table.index.name = "Strategy"
-        styled = format_dataframe_styler(table)
-        st.dataframe(styled, use_container_width=True, height=400)
-        render_export_section(table, "optimization_comparison.csv", key="opt_comparison")
-
-        with st.expander("\U0001f4c8 Equity Curves"):
-            st.caption("How $10k would have grown under each strategy's allocation.")
-            curves = compare_portfolios(optimized, initial_value=10000)
-            fig = go.Figure()
-            colors = chart_colors(len(curves.columns))
-            for i, col in enumerate(curves.columns):
-                fig.add_trace(go.Scatter(x=curves.index, y=curves[col], name=col, mode="lines",
-                                         line=dict(color=colors[i])))
-            apply_theme(fig, height=500)
-            st.plotly_chart(fig, use_container_width=True)
+# ═══════════════════════════════════════════════════════════════════
+# TAB 3: CUSTOM VIEWS & SIZING (Black-Litterman & Kelly)
+# ═══════════════════════════════════════════════════════════════════
 
 with tab_bl:
     col_bl, col_kelly = st.columns(2)
@@ -374,7 +535,7 @@ with tab_bl:
             if nonzero:
                 fig = make_pie_chart(list(nonzero.keys()), [v * 100 for v in nonzero.values()],
                                      height=300)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="bl_pie")
 
     with col_kelly:
         section_title("Kelly Criterion")
@@ -399,96 +560,11 @@ with tab_bl:
             if nonzero:
                 fig = make_pie_chart(list(nonzero.keys()), [v * 100 for v in nonzero.values()],
                                      height=300)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="kelly_pie")
 
-with tab_frontier:
-    section_title("Efficient Frontier")
-    if is_beginner():
-        st.caption("The curve shows the best possible return for each level of risk. "
-                    "Dots are your investments. Anything below the curve could be improved.")
-    else:
-        st.caption("The curved line shows the best possible return for each risk level. "
-                    "Individual assets are dots; optimal strategy points are marked with symbols.")
-
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        color_metric = st.selectbox("Color by metric", [
-            "sharpe", "sortino", "calmar", "omega", "max_drawdown", "cvar",
-        ], index=0, format_func=lambda x: {
-            "sharpe": "Sharpe Ratio", "sortino": "Sortino Ratio",
-            "calmar": "Calmar Ratio", "omega": "Omega Ratio",
-            "max_drawdown": "Max Drawdown", "cvar": "CVaR (95%)",
-        }[x])
-    with col_f2:
-        show_strategies = st.multiselect(
-            "Show optimal points",
-            ["Max Sharpe", "Min Volatility", "Min CVaR", "Min Semivariance",
-             "Semivariance Utility", "Max Quadratic Utility", "HRP", "Kelly Criterion"],
-            default=["Max Sharpe", "Min Volatility", "Min CVaR", "HRP"],
-        )
-
-    with st.spinner("Computing efficient frontier..."):
-        frontier_rets, frontier_risks, max_sharpe_pt, min_vol_pt, strategy_points = efficient_frontier_data(prices, risk_free_rate=rf)
-        mu = compute_expected_returns(prices)
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=frontier_risks, y=frontier_rets, mode="lines",
-        name="Efficient Frontier", line=dict(width=3, color="#00d4aa"),
-    ))
-
-    markers = {
-        "Max Sharpe": dict(symbol="star", color="green"),
-        "Min Volatility": dict(symbol="diamond", color="red"),
-        "Min CVaR": dict(symbol="hexagon", color="purple"),
-        "Min Semivariance": dict(symbol="square", color="orange"),
-        "Semivariance Utility": dict(symbol="triangle-up", color="teal"),
-        "Max Quadratic Utility": dict(symbol="cross", color="brown"),
-        "HRP": dict(symbol="pentagon", color="magenta"),
-        "Kelly Criterion": dict(symbol="x", color="navy"),
-    }
-
-    for name in show_strategies:
-        if name in strategy_points:
-            pt = strategy_points[name]
-            m = markers.get(name, dict(symbol="circle", color="gray"))
-            metric_val = pt.get(color_metric, 0)
-            fig.add_trace(go.Scatter(
-                x=[pt["risk"]], y=[pt["return"]], mode="markers+text",
-                name=f"{name} ({color_metric}: {metric_val:.3f})",
-                marker=dict(size=14, symbol=m["symbol"], color=m["color"]),
-                text=[name], textposition="top center",
-            ))
-
-    colors = chart_colors(len(prices.columns))
-    for i, t in enumerate(prices.columns):
-        ann_vol = returns[t].std() * np.sqrt(252)
-        ann_ret = mu.get(t, 0)
-        fig.add_trace(go.Scatter(
-            x=[ann_vol], y=[ann_ret], mode="markers+text", name=t,
-            text=[t], textposition="top center",
-            marker=dict(size=10, color=colors[i]),
-        ))
-    fig.update_layout(
-        xaxis_title="Annualized Volatility", yaxis_title="Annualized Expected Return",
-    )
-    apply_theme(fig, height=700)
-    st.plotly_chart(fig, use_container_width=True)
-
-    if strategy_points:
-        summary = {}
-        for name, pt in strategy_points.items():
-            summary[name] = {
-                "Return": f"{pt['return']:.2%}",
-                "Risk": f"{pt['risk']:.2%}",
-                "Sharpe": f"{pt['sharpe']:.3f}",
-                "Sortino": f"{pt['sortino']:.3f}",
-                "Calmar": f"{pt['calmar']:.3f}",
-                "Omega": f"{pt['omega']:.3f}",
-                "Max DD": f"{pt['max_drawdown']:.2%}",
-                "CVaR": f"{pt['cvar']:.4f}",
-            }
-        st.dataframe(pd.DataFrame(summary), use_container_width=True, height=300)
+# ═══════════════════════════════════════════════════════════════════
+# BOTTOM SECTIONS
+# ═══════════════════════════════════════════════════════════════════
 
 divider()
 render_recommended_portfolio(prices, returns, tickers, rf)
