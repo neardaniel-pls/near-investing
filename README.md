@@ -12,6 +12,51 @@ NEAR Investing is a Streamlit-based web application that lets you analyze any co
 
 The workflow follows a natural progression: **fetch data → analyze risk → optimize allocation → backtest → simulate**.
 
+## Screenshots
+
+<details>
+<summary><strong>Home Page</strong></summary>
+
+![Home Page](assets/img/main%20page.png)
+
+</details>
+
+<details>
+<summary><strong>Dashboard</strong></summary>
+
+![Dashboard](assets/img/dashboard.png)
+
+</details>
+
+<details>
+<summary><strong>Risk Metrics</strong></summary>
+
+![Risk Metrics](assets/img/risk.png)
+
+![Risk Metrics - Benchmark Comparison](assets/img/risk2.png)
+
+</details>
+
+<details>
+<summary><strong>Optimization</strong></summary>
+
+![Optimization - Efficient Frontier](assets/img/optimize.png)
+
+![Optimization - Strategy Comparison](assets/img/optimize2.png)
+
+![Optimization - Weights](assets/img/optimize3.png)
+
+![Optimization - Black-Litterman](assets/img/optimize4.png)
+
+</details>
+
+<details>
+<summary><strong>Backtest</strong></summary>
+
+![Backtest](assets/img/backtest.png)
+
+</details>
+
 ## Pages
 
 ### Dashboard
