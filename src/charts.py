@@ -1,4 +1,5 @@
 import plotly.graph_objects as go
+import numpy as np
 from src.styles import CHART_PALETTE
 
 
@@ -132,25 +133,37 @@ def make_scatter_plot(points: list, x_title: str = "", y_title: str = "", height
     return fig
 
 
-def format_dataframe_styler(df, highlight_max_cols=None, pct_cols=None):
+def format_dataframe_styler(df, highlight_max_cols=None, pct_cols=None, float_precision=4):
     styler = df.style
 
-    if pct_cols:
-        fmt_dict = {c: "{:.2%}" for c in pct_cols if c in df.columns}
-        if fmt_dict:
-            styler = styler.format(fmt_dict)
+    pct_set = {c for c in (pct_cols or []) if c in df.columns}
+    if pct_set:
+        styler = styler.format({c: "{:.2%}" for c in pct_set}, na_rep="\u2014")
+
+    def _fmt_num(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            if isinstance(v, float) and np.isnan(v):
+                return "\u2014"
+            return f"{v:.{float_precision}f}"
+        return v
 
     def _color_positive_negative(val):
-        if isinstance(val, (int, float)):
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            if isinstance(val, float) and np.isnan(val):
+                return ""
             if val > 0:
                 return "color: #00d4aa"
             elif val < 0:
                 return "color: #e45756"
         return ""
 
-    for col in df.columns:
-        if df[col].dtype in ["float64", "float32", "int64", "int32"]:
-            styler = styler.map(_color_positive_negative, subset=[col])
+    numeric_cols = [c for c in df.columns if np.issubdtype(df[c].dtype, np.number)]
+    non_pct_numeric = [c for c in numeric_cols if c not in pct_set]
+    if non_pct_numeric:
+        styler = styler.format({c: _fmt_num for c in non_pct_numeric})
+
+    for col in numeric_cols:
+        styler = styler.map(_color_positive_negative, subset=[col])
 
     if highlight_max_cols:
         for col in highlight_max_cols:

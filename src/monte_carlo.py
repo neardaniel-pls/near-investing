@@ -34,10 +34,13 @@ def simulate_multivariate_monte_carlo(
     w = np.array([weights[t] for t in tickers])
 
     if use_historical:
-        portfolio_rets = (returns[tickers] * w).sum(axis=1)
-        return simulate_portfolio_monte_carlo(
-            portfolio_rets, n_simulations, n_days, initial_value
-        )
+        hist = returns[tickers].values
+        T = hist.shape[0]
+        idx = np.random.randint(0, T, (n_days, n_simulations))
+        sampled = hist[idx]
+        portfolio_sim = np.tensordot(sampled, w, axes=([2], [0]))
+        cumulative = np.cumprod(1 + portfolio_sim, axis=0)
+        return initial_value * cumulative
 
     mean_returns = returns[tickers].mean().values
     cov_matrix = returns[tickers].cov().values

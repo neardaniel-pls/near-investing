@@ -37,7 +37,7 @@ def sortino_ratio(returns: pd.Series, rf: float = RISK_FREE_RATE) -> float:
     downside_dev = np.sqrt((downside_diff ** 2).mean()) * np.sqrt(252)
     excess = annualized_return(returns) - rf
     if downside_dev == 0:
-        return float("inf")
+        return np.nan
     return excess / downside_dev
 
 
@@ -45,7 +45,7 @@ def calmar_ratio(returns: pd.Series, rf: float = RISK_FREE_RATE) -> float:
     ann_ret = annualized_return(returns)
     mdd = max_drawdown(returns)
     if mdd == 0:
-        return 0.0
+        return np.nan
     return (ann_ret - rf) / abs(mdd)
 
 
@@ -68,7 +68,7 @@ def omega_ratio(returns: pd.Series, threshold: float = RISK_FREE_RATE / 252) -> 
     gains = returns[returns > threshold] - threshold
     losses = threshold - returns[returns < threshold]
     if losses.sum() == 0:
-        return float("inf")
+        return np.nan
     return gains.sum() / losses.sum()
 
 

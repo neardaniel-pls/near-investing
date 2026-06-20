@@ -15,7 +15,8 @@ from src.metrics import metrics_table
 from src.ui import (
     init_shared_state, require_data, render_workflow_stepper,
     render_next_button, render_portfolio_info, render_weight_sliders,
-    render_page_header, is_beginner, label,
+    render_page_header, render_recommended_sidebar_widget,
+    is_beginner, label,
 )
 from src.styles import inject_global_styles, divider, section_title
 from src.charts import apply_theme, chart_colors, format_dataframe_styler
@@ -40,11 +41,12 @@ rec_label = st.session_state.get("recommended_label", "")
 
 with st.sidebar:
     render_portfolio_info()
+    render_recommended_sidebar_widget()
     st.markdown("---")
 
     if rec_weights:
         st.success(f"Optimized: **{rec_label}**")
-        default_bt = {t: round(v * 100) for t, v in rec_weights.items()}
+        default_bt = {t: v * 100 for t, v in rec_weights.items()}
     else:
         default_bt = {}
 

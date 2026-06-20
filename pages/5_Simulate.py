@@ -12,7 +12,6 @@ from src.portfolio import build_portfolio_returns, equity_curve
 from src.monte_carlo import (
     simulate_portfolio_monte_carlo,
     simulate_historical_bootstrap,
-    simulate_multivariate_monte_carlo,
     monte_carlo_statistics,
     monte_carlo_return_stats,
 )
@@ -26,7 +25,8 @@ from src.ui import (
     init_shared_state, require_data, render_workflow_stepper,
     render_portfolio_info, render_weight_sliders,
     save_recommended_weights, render_recommended_portfolio,
-    render_page_header, is_beginner, label,
+    render_page_header, render_recommended_sidebar_widget,
+    is_beginner, label,
 )
 from src.styles import inject_global_styles, divider, section_title
 from src.charts import apply_theme, chart_colors, make_bar_chart, format_dataframe_styler
@@ -58,6 +58,7 @@ tab_mc, tab_rolling = st.tabs(tab_labels)
 
 with tab_mc:
     with st.sidebar:
+        render_recommended_sidebar_widget()
         st.markdown("#### Monte Carlo Weights")
         if rec_weights:
             st.success(f"Optimized: **{rec_label}**")
@@ -68,7 +69,7 @@ with tab_mc:
         else:
             st.info("No optimization run yet. Set weights manually or run Optimize first.")
 
-        default_w = {t: round(v * 100) for t, v in rec_weights.items()} if rec_weights else None
+        default_w = {t: v * 100 for t, v in rec_weights.items()} if rec_weights else None
         weights, weights_valid = render_weight_sliders(
             tickers, key_prefix="mc", default_weights=default_w,
         )
@@ -134,7 +135,6 @@ with tab_mc:
 
     # --- RUN SIMULATIONS ---
     use_historical = "Historical" in method_choice
-    use_multivariate = st.session_state.get("mc_use_multi", False)
 
     portfolio_rets = build_portfolio_returns(prices, weights)
 
@@ -146,16 +146,10 @@ with tab_mc:
         if use_historical:
             main_paths = bootstrap_paths
         else:
-            if use_multivariate:
-                main_paths = simulate_multivariate_monte_carlo(
-                    prices, weights, n_simulations=n_sims, n_days=n_days,
-                    initial_value=initial_value, random_seed=seed, use_historical=False,
-                )
-            else:
-                main_paths = simulate_portfolio_monte_carlo(
-                    portfolio_rets, n_simulations=n_sims, n_days=n_days,
-                    initial_value=initial_value, random_seed=seed,
-                )
+            main_paths = simulate_portfolio_monte_carlo(
+                portfolio_rets, n_simulations=n_sims, n_days=n_days,
+                initial_value=initial_value, random_seed=seed,
+            )
 
     # --- SUMMARY CARD ---
     main_stats = monte_carlo_statistics(main_paths)
@@ -344,6 +338,7 @@ with tab_mc:
 
 with tab_rolling:
     with st.sidebar:
+        render_recommended_sidebar_widget()
         st.markdown("#### Walk-Forward Settings")
         target_help = ("The strategy to use in each rolling window." if not is_beginner()
                        else "The optimization method to use in each time window.")

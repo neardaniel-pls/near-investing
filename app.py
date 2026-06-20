@@ -7,9 +7,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.data import fetch_prices, compute_returns, clear_cache, fetch_ticker_names
 from src.config import load_config, update_config
+from src.optimization import optimize_portfolio
 from src.ui import (
     init_shared_state, render_workflow_stepper, render_portfolio_info,
     render_mode_toggle, is_beginner, load_sample_portfolio,
+    save_recommended_weights,
 )
 from src.styles import inject_global_styles, divider
 
@@ -142,7 +144,21 @@ if fetch_btn:
             else "Couldn't load data. Please check that your ticker symbols are correct."
         )
         st.stop()
+
+    dropped = [t for t in tickers if t not in prices.columns]
+    if dropped:
+        st.warning(f"\u26a0\ufe0f No data found for {len(dropped)} ticker(s); they were skipped: {', '.join(dropped)}")
+        tickers = [t for t in tickers if t in prices.columns]
+
     returns = compute_returns(prices)
+    # Auto-recommend a default optimal allocation so the answer is available immediately
+    try:
+        _rf = st.session_state.get("risk_free_rate", 0.04)
+        rec = optimize_portfolio(prices, target="max_sharpe", risk_free_rate=_rf)
+        if rec:
+            save_recommended_weights(rec, "Auto: Max Sharpe")
+    except Exception:
+        pass
     with st.spinner("Resolving ticker names..."):
         ticker_names = fetch_ticker_names(tickers)
 

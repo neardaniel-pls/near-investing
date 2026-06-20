@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.ui import (
     init_shared_state, render_workflow_stepper,
     render_next_button, render_page_header,
+    render_recommendation_banner, require_data,
     is_beginner, label,
 )
 from src.metrics import annualized_return, annualized_volatility, sharpe_ratio, max_drawdown, cagr
@@ -23,19 +24,7 @@ inject_global_styles()
 init_shared_state()
 render_workflow_stepper(1)
 render_page_header("Dashboard")
-
-if "returns" not in st.session_state:
-    msg = "Go to the home page to load your portfolio data first." if is_beginner() \
-        else "No data loaded. Go to the home page to fetch your portfolio data."
-    st.markdown(
-        f'<div style="text-align:center; padding:60px 20px;">'
-        f'<p style="color:#aaa; font-size:1.1em;">{msg}</p>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("Go to Home", use_container_width=True, type="primary"):
-        st.switch_page("app.py")
-    st.stop()
+require_data()
 
 prices = st.session_state["prices"]
 returns = st.session_state["returns"]
@@ -63,6 +52,8 @@ kpis = [
 ]
 from src.styles import render_kpi_row
 render_kpi_row(kpis)
+
+render_recommendation_banner(prices, returns, tickers, rf)
 
 divider()
 

@@ -37,9 +37,13 @@ def clear_cache(tickers: list[str] | None = None) -> int:
     os.makedirs(CACHE_DIR, exist_ok=True)
     if tickers is None:
         count = 0
-        for f in os.listdir(CACHE_DIR):
-            os.remove(os.path.join(CACHE_DIR, f))
-            count += 1
+        for fname in os.listdir(CACHE_DIR):
+            if fname.endswith(".parquet") or fname.endswith(".json"):
+                try:
+                    os.remove(os.path.join(CACHE_DIR, fname))
+                    count += 1
+                except OSError:
+                    pass
         return count
     sorted_tickers = sorted([t.upper() for t in tickers])
     removed = 0
@@ -70,6 +74,7 @@ def fetch_prices(
     period: str | None = None,
     use_cache: bool = True,
     cache_max_age_days: int = 1,
+    fill_gaps_days: int = 5,
 ) -> pd.DataFrame:
     key = _cache_key(tickers, start, end, period)
 
@@ -97,8 +102,9 @@ def fetch_prices(
         prices = close.to_frame(name=tickers[0]) if isinstance(close, pd.Series) else close
     else:
         prices = close
-    prices = prices.dropna()
     prices.index = pd.to_datetime(prices.index)
+    prices = prices.sort_index()
+    prices = _clean_prices(prices, fill_gaps_days=fill_gaps_days)
 
     if use_cache:
         os.makedirs(CACHE_DIR, exist_ok=True)
@@ -114,6 +120,28 @@ def fetch_prices(
             }, f)
 
     return prices
+
+
+def _clean_prices(prices: pd.DataFrame, fill_gaps_days: int = 5) -> pd.DataFrame:
+    """Trim pre-listing NaNs per column, forward-fill short internal gaps (exchange
+    holiday mismatches), drop entirely-empty columns, then restrict to the common
+    date range so one late-listing or invalid ticker doesn't truncate/zero the rest."""
+    if not isinstance(prices, pd.DataFrame) or prices.empty:
+        return prices.dropna() if isinstance(prices, pd.DataFrame) else prices
+    trimmed = {}
+    for col in prices.columns:
+        s = prices[col]
+        first = s.first_valid_index()
+        if first is None:
+            continue
+        s = s.loc[first:]
+        if fill_gaps_days and fill_gaps_days > 0:
+            s = s.ffill(limit=fill_gaps_days)
+        trimmed[col] = s
+    if not trimmed:
+        return pd.DataFrame()
+    out = pd.DataFrame(trimmed)
+    return out.dropna()
 
 
 def compute_returns(prices: pd.DataFrame) -> pd.DataFrame:

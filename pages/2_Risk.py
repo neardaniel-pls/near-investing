@@ -10,11 +10,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.metrics import (
     metrics_table, sharpe_ratio, sortino_ratio,
     calmar_ratio, omega_ratio, annualized_return, annualized_volatility,
+    max_drawdown, cvar, cagr,
     quantstats_report,
 )
 from src.ui import (
     init_shared_state, require_data, render_workflow_stepper,
     render_next_button, render_portfolio_info, render_page_header,
+    render_recommended_sidebar_widget,
     is_beginner, label,
 )
 from src.styles import inject_global_styles, divider, section_title
@@ -35,6 +37,7 @@ rf = st.session_state.get("risk_free_rate", 0.04)
 
 with st.sidebar:
     render_portfolio_info()
+    render_recommended_sidebar_widget()
     st.markdown("---")
     st.header("Settings")
     bench_label = "Benchmark" if not is_beginner() else "Compare Against"
@@ -60,37 +63,24 @@ def _compute_rolling(window_returns: pd.Series, metric: str, rf: float) -> float
         r = window_returns
         if len(r) < 10:
             return np.nan
-        ann_ret = (1 + r).prod() ** (252 / len(r)) - 1
-        ann_vol = r.std() * np.sqrt(252)
         if metric == "Sharpe Ratio":
-            return (ann_ret - rf) / ann_vol if ann_vol != 0 else 0.0
+            return sharpe_ratio(r, rf=rf)
         elif metric == "Sortino Ratio":
-            threshold = rf / 252
-            downside_diff = np.minimum(r - threshold, 0.0)
-            downside_dev = np.sqrt((downside_diff ** 2).mean()) * np.sqrt(252)
-            return (ann_ret - rf) / downside_dev if downside_dev != 0 else float("inf")
+            return sortino_ratio(r, rf=rf)
         elif metric == "Calmar Ratio":
-            cum = (1 + r).cumprod()
-            mdd = ((cum - cum.cummax()) / cum.cummax()).min()
-            return (ann_ret - rf) / abs(mdd) if mdd != 0 else 0.0
+            return calmar_ratio(r, rf=rf)
         elif metric == "Omega Ratio":
-            threshold = rf / 252
-            gains = (r[r > threshold] - threshold).sum()
-            losses = (threshold - r[r < threshold]).sum()
-            return gains / losses if losses != 0 else float("inf")
+            return omega_ratio(r, threshold=rf / 252)
         elif metric == "Volatility":
-            return ann_vol
+            return annualized_volatility(r)
         elif metric == "Max Drawdown":
-            cum = (1 + r).cumprod()
-            return ((cum - cum.cummax()) / cum.cummax()).min()
+            return max_drawdown(r)
         elif metric == "CVaR (95%)":
-            var_threshold = np.percentile(r, 5)
-            tail = r[r <= var_threshold]
-            return tail.mean() if len(tail) > 0 else var_threshold
+            return cvar(r)
         elif metric == "CAGR":
-            return (1 + r).prod() ** (252 / len(r)) - 1
+            return cagr(r)
         elif metric == "Annualized Return":
-            return ann_ret
+            return annualized_return(r)
         elif metric == "Skewness":
             return float(r.skew())
         elif metric == "Kurtosis":

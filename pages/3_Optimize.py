@@ -23,11 +23,18 @@ from src.ui import (
     init_shared_state, require_data, render_workflow_stepper,
     render_next_button, render_portfolio_info, save_recommended_weights,
     render_recommended_portfolio, render_page_header,
-    is_beginner, label,
+    render_recommended_sidebar_widget,
+    is_beginner, label, fmt_ratio,
 )
 from src.styles import inject_global_styles, divider, section_title
 from src.charts import apply_theme, chart_colors, make_pie_chart, make_bar_chart, format_dataframe_styler
 from src.export import render_export_section
+
+
+@st.cache_data(show_spinner=False)
+def _cached_frontier(prices_df, rf):
+    return efficient_frontier_data(prices_df, risk_free_rate=rf)
+
 
 st.set_page_config(page_title="Optimize", layout="wide")
 inject_global_styles()
@@ -69,6 +76,7 @@ TARGET_BEGINNER = {
 
 with st.sidebar:
     render_portfolio_info()
+    render_recommended_sidebar_widget()
     st.markdown("---")
 
 with st.expander("\u2753 What is portfolio optimization?" if not is_beginner() else "\u2753 How does optimization work?"):
@@ -170,12 +178,16 @@ with tab_all:
     optimized["Equal Weight"] = build_portfolio_returns(prices, {t: 1.0 / len(tickers) for t in tickers})
     table = metrics_table(optimized, rf=rf)
 
-    rank_direction = "higher" if rank_metric in [
+    # "higher is better" covers ratios/returns plus Max Drawdown and CVaR, which are
+    # negative values where closer to 0 (= larger) is better. Volatility and Kurtosis
+    # are positive and lower is better.
+    higher_is_better = rank_metric in [
         "Sharpe Ratio", "Sortino Ratio", "Calmar Ratio", "Omega Ratio",
         "CAGR", "Skewness", "Avg Daily Return",
-    ] else "lower"
+        "Max Drawdown", "CVaR (95%)",
+    ]
 
-    ranked = table[rank_metric].sort_values(ascending=(rank_direction == "lower"))
+    ranked = table[rank_metric].sort_values(ascending=not higher_is_better)
     best_name = ranked.index[0]
     best_val = ranked.iloc[0]
 
@@ -184,7 +196,21 @@ with tab_all:
 
     # --- RANKING BAR CHART ---
     section_title("\U0001f3c6 Strategy Ranking")
+    _rank_help = {
+        "Sharpe Ratio": "Best return per unit of total risk." if not is_beginner() else "Best return for the risk taken.",
+        "Sortino Ratio": "Best return per unit of downside risk.",
+        "Calmar Ratio": "Best return relative to the worst drawdown.",
+        "Omega Ratio": "Best odds of gains over losses.",
+        "CAGR": "Highest compound annual growth.",
+        "Annualized Volatility": "Lowest volatility (lower is better).",
+        "Max Drawdown": "Smallest worst-case drop (less negative is better).",
+        "CVaR (95%)": "Smallest expected tail loss (less negative is better).",
+        "Skewness": "Most right-skewed (fewer big losses).",
+        "Kurtosis": "Thinnest tails (fewer extreme events).",
+        "Avg Daily Return": "Highest average daily return.",
+    }
     st.success(f"**Best: {best_name}** \u2014 {rank_metric}: {best_val:.4f}")
+    st.caption(f"\U0001f4a1 Ranking by **{rank_metric}**: {_rank_help.get(rank_metric, '')}")
     if is_beginner():
         st.caption("This strategy's weights have been saved for use in simulations.")
     else:
@@ -284,7 +310,7 @@ with tab_all:
         )
 
     with st.spinner("Computing efficient frontier..."):
-        frontier_rets, frontier_risks, max_sharpe_pt, min_vol_pt, strategy_points = efficient_frontier_data(prices, risk_free_rate=rf)
+        frontier_rets, frontier_risks, max_sharpe_pt, min_vol_pt, strategy_points = _cached_frontier(prices, rf)
         mu = compute_expected_returns(prices)
 
     fig = go.Figure()
@@ -418,13 +444,21 @@ with tab_single:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         if st.button(opt_btn_label, type="primary", use_container_width=True):
             with st.spinner("Optimizing..."):
-                if target == "hrp":
-                    w = optimize_portfolio(prices, target="hrp")
-                else:
-                    w = optimize_portfolio(prices, target=target, target_value=target_value, risk_free_rate=rf, risk_aversion=5)
-                st.session_state["opt_weights"] = w
-                save_recommended_weights(w, f"Single: {target}")
-                st.toast(f"Optimization complete: {target}", icon="\u2705")
+                try:
+                    if target == "hrp":
+                        w = optimize_portfolio(prices, target="hrp")
+                    else:
+                        w = optimize_portfolio(prices, target=target, target_value=target_value, risk_free_rate=rf, risk_aversion=5)
+                    st.session_state["opt_weights"] = w
+                    save_recommended_weights(w, f"Single: {target}")
+                    st.toast(f"Optimization complete: {target}", icon="\u2705")
+                except Exception as e:
+                    msg = str(e)
+                    if "target" in msg.lower() or "infeasible" in msg.lower() or "efficient" in target:
+                        st.error("Couldn't find a portfolio for that target. Try a less extreme target value "
+                                 "(lower target return or higher target volatility).")
+                    else:
+                        st.error(f"Optimization failed: {e}")
 
     if "opt_weights" in st.session_state:
         w = st.session_state["opt_weights"]
@@ -477,9 +511,9 @@ with tab_single:
         with kpi_cols2[0]:
             st.metric(label("Volatility"), f"{port_vol:.2%}")
         with kpi_cols2[1]:
-            st.metric(label("Sortino Ratio"), f"{port_sortino:.3f}")
+            st.metric(label("Sortino Ratio"), fmt_ratio(port_sortino))
         with kpi_cols2[2]:
-            st.metric(label("Calmar Ratio"), f"{port_calmar:.3f}")
+            st.metric(label("Calmar Ratio"), fmt_ratio(port_calmar))
         with kpi_cols2[3]:
             st.metric("Final Value", f"${final_val:,.0f}", delta=f"on ${init_inv:,.0f} initial")
 
@@ -519,12 +553,15 @@ with tab_bl:
 
         if st.button("Run Black-Litterman", type="primary"):
             with st.spinner("Running Black-Litterman..."):
-                bl_weights = black_litterman_optimize(
-                    prices, views=views, view_confidences=view_confs, target=bl_target,
-                )
-                st.session_state["bl_weights"] = bl_weights
-                save_recommended_weights(bl_weights, f"Black-Litterman ({bl_target})")
-                st.toast("Black-Litterman complete!", icon="\u2705")
+                try:
+                    bl_weights = black_litterman_optimize(
+                        prices, views=views, view_confidences=view_confs, target=bl_target,
+                    )
+                    st.session_state["bl_weights"] = bl_weights
+                    save_recommended_weights(bl_weights, f"Black-Litterman ({bl_target})")
+                    st.toast("Black-Litterman complete!", icon="\u2705")
+                except Exception as e:
+                    st.error(f"Black-Litterman failed: {e}")
 
         if "bl_weights" in st.session_state:
             bl_w = st.session_state["bl_weights"]
@@ -544,7 +581,7 @@ with tab_bl:
                         "Can be aggressive \u2014 consider using half-Kelly in practice.")
         else:
             st.caption("The mathematically optimal position size to maximize long-term growth. "
-                        "Based on mean_return / variance for each asset. Can be aggressive \u2014 consider using half-Kelly in practice.")
+                        "Based on mean_return / variance per asset (ignores cross-asset correlation). Can be aggressive \u2014 consider using half-Kelly in practice.")
         if st.button("Compute Kelly Weights", type="primary"):
             kelly_w = kelly_criterion(prices)
             st.session_state["kelly_weights"] = kelly_w

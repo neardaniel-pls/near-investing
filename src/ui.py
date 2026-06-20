@@ -1,6 +1,6 @@
 import streamlit as st
 from src.config import load_config, update_config
-from src.styles import CHART_PALETTE, section_title
+from src.styles import CHART_PALETTE, section_title, divider
 
 
 BEGINNER_LABELS = {
@@ -161,30 +161,14 @@ PAGES = [
 
 
 def render_nav_bar(current_page: str):
-    has_data = "prices" in st.session_state
-    items_html = ""
+    links = [("Home", "app.py", "\U0001f3e0")]
     for page_name, page_file in PAGES:
-        icon = PAGE_ICONS.get(page_name, "")
-        is_current = page_name == current_page
+        links.append((page_name, f"pages/{page_file}.py", PAGE_ICONS.get(page_name, "")))
 
-        if is_current:
-            items_html += (
-                f'<div class="nav-item active">'
-                f'{icon} {page_name}</div>'
-            )
-        else:
-            border_c = "#00d4aa55" if has_data else "#ffffff22"
-            bg_c = "#00d4aa11" if has_data else "#ffffff08"
-            text_c = "#00d4aa99" if has_data else "#666"
-            items_html += (
-                f'<div class="nav-item" style="background:{bg_c};border-color:{border_c};color:{text_c};">'
-                f'{icon} {page_name}</div>'
-            )
-
-    st.markdown(
-        f'<div class="nav-bar">{items_html}</div>',
-        unsafe_allow_html=True,
-    )
+    cols = st.columns(len(links))
+    for col, (name, path, icon) in zip(cols, links):
+        with col:
+            st.page_link(path, label=name, icon=icon, use_container_width=True)
 
 
 def render_workflow_stepper(current_step: int):
@@ -246,7 +230,7 @@ def render_weight_sliders(tickers: list, key_prefix: str, default_weights: dict 
         else "Make all your percentages add up to 100% automatically.",
     )
 
-    equal_val = round(100 / len(tickers))
+    equal_val = 100.0 / len(tickers)
 
     btn_col1, btn_col2, btn_col3 = st.columns(3)
     with btn_col1:
@@ -261,12 +245,18 @@ def render_weight_sliders(tickers: list, key_prefix: str, default_weights: dict 
             if st.button(btn_text, key=f"{key_prefix}_useopt",
                          help=f"Load weights from: {opt_label}"):
                 for t in tickers:
-                    st.session_state[f"{key_prefix}_{t}"] = round(opt_weights.get(t, 0) * 100)
+                    st.session_state[f"{key_prefix}_{t}"] = opt_weights.get(t, 0) * 100
     with btn_col3:
         pass
 
     if opt_weights:
         st.caption(f"\u2705 Optimized weights available: **{opt_label}**")
+
+    # Migrate any stale integer keys from older versions to float sliders
+    for t in tickers:
+        k = f"{key_prefix}_{t}"
+        if k in st.session_state and isinstance(st.session_state[k], int):
+            del st.session_state[k]
 
     weights = {}
     half = (len(tickers) + 1) // 2
@@ -275,8 +265,8 @@ def render_weight_sliders(tickers: list, key_prefix: str, default_weights: dict 
     for i, t in enumerate(tickers):
         col = col1 if i < half else col2
         with col:
-            default = default_weights.get(t, equal_val)
-            w = st.slider(f"{t}", 0, 100, default, key=f"{key_prefix}_{t}")
+            default = float(default_weights.get(t, equal_val))
+            w = st.slider(f"{t}", 0.0, 100.0, default, step=0.5, key=f"{key_prefix}_{t}")
             weights[t] = w / 100
 
     total = sum(weights.values())
@@ -320,6 +310,18 @@ def fmt_dec(val, decimals=4) -> str:
     return f"{val:.{decimals}f}"
 
 
+def fmt_ratio(val, decimals=3) -> str:
+    import math
+    if val is None:
+        return "N/A"
+    try:
+        if math.isnan(val):
+            return "\u221e"
+    except (TypeError, ValueError):
+        pass
+    return f"{val:.{decimals}f}"
+
+
 def fmt_currency(val) -> str:
     if val is None:
         return "N/A"
@@ -329,6 +331,83 @@ def fmt_currency(val) -> str:
 def save_recommended_weights(weights: dict, label: str):
     st.session_state["recommended_weights"] = weights
     st.session_state["recommended_label"] = label
+
+
+def _recommendation_metrics(prices, rec, rf):
+    from src.portfolio import build_portfolio_returns
+    from src.metrics import annualized_return, sharpe_ratio, max_drawdown, cagr
+    port_ret = build_portfolio_returns(prices, rec)
+    init_inv = st.session_state.get("initial_investment", 10000)
+    total_ret = (1 + port_ret).prod() - 1
+    return {
+        "port_ret": port_ret,
+        "sharpe": sharpe_ratio(port_ret, rf=rf),
+        "cagr": cagr(port_ret),
+        "ann_ret": annualized_return(port_ret),
+        "max_dd": max_drawdown(port_ret),
+        "total_ret": total_ret,
+        "final_val": init_inv * (1 + total_ret),
+        "init_inv": init_inv,
+    }
+
+
+def render_recommendation_banner(prices, returns, tickers, rf):
+    """Compact 'best portfolio so far' banner shown prominently (e.g. Dashboard top)."""
+    rec = st.session_state.get("recommended_weights")
+    rec_label = st.session_state.get("recommended_label", "")
+    if not rec:
+        return
+    m = _recommendation_metrics(prices, rec, rf)
+
+    section_title("\U0001f3af Recommended Allocation" if not is_beginner() else "\u2b50 Best Mix So Far")
+    st.caption(
+        f"Auto-suggested from your assets: **{rec_label}**. Refine it on the Optimize page."
+        if not is_beginner()
+        else f"Here's a smart mix based on your assets: **{rec_label}**. You can fine-tune it in Optimize."
+    )
+
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.metric(label("Sharpe Ratio"), fmt_ratio(m["sharpe"]))
+    with k2:
+        st.metric(label("CAGR"), f"{m['cagr']:.2%}")
+    with k3:
+        st.metric(label("Max Drawdown"), f"{m['max_dd']:.2%}", delta_color="inverse")
+    with k4:
+        st.metric("Est. Final Value", f"${m['final_val']:,.0f}", delta=f"on ${m['init_inv']:,.0f}")
+
+    nonzero = {k: v for k, v in sorted(rec.items(), key=lambda x: -x[1]) if v > 0.001}
+    if nonzero:
+        weight_line = "   ".join(f"`{t}` {w:.0%}" for t, w in list(nonzero.items())[:6])
+        st.markdown(weight_line)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("\u2699\ufe0f Refine in Optimize", use_container_width=True):
+            st.switch_page("pages/3_Optimize.py")
+    with c2:
+        if st.button("\U0001f3af Backtest This", use_container_width=True):
+            st.switch_page("pages/4_Backtest.py")
+    with c3:
+        if st.button("\U0001f3b2 Simulate This", use_container_width=True, type="primary"):
+            st.switch_page("pages/5_Simulate.py")
+    divider()
+
+
+def render_recommended_sidebar_widget():
+    """Persistent compact recommendation shown in the sidebar on every page."""
+    rec = st.session_state.get("recommended_weights")
+    rec_label = st.session_state.get("recommended_label", "")
+    if not rec:
+        return
+    with st.expander("\u2b50 Recommended", expanded=False):
+        st.caption(f"**{rec_label}**")
+        nonzero = {k: v for k, v in sorted(rec.items(), key=lambda x: -x[1]) if v > 0.001}
+        for t, w in list(nonzero.items())[:8]:
+            st.markdown(f"{t}: **{w:.1%}**")
+        if len(nonzero) > 8:
+            st.caption(f"+ {len(nonzero) - 8} more")
+        st.caption("Auto-loaded in Backtest & Simulate.")
 
 
 def render_recommended_portfolio(prices, returns, tickers, rf):
@@ -370,9 +449,9 @@ def render_recommended_portfolio(prices, returns, tickers, rf):
     with kpi_cols2[0]:
         st.metric(label("Volatility"), f"{annualized_volatility(port_ret):.2%}")
     with kpi_cols2[1]:
-        st.metric(label("Sortino Ratio"), f"{sortino_ratio(port_ret, rf=rf):.3f}")
+        st.metric(label("Sortino Ratio"), fmt_ratio(sortino_ratio(port_ret, rf=rf)))
     with kpi_cols2[2]:
-        st.metric(label("Calmar Ratio"), f"{calmar_ratio(port_ret, rf=rf):.3f}")
+        st.metric(label("Calmar Ratio"), fmt_ratio(calmar_ratio(port_ret, rf=rf)))
     with kpi_cols2[3]:
         st.metric("Final Value", f"${final_val:,.0f}", delta=f"on ${init_inv:,.0f} initial")
 
@@ -409,6 +488,10 @@ def load_sample_portfolio():
     if prices.empty:
         st.error("Could not load sample data. Check your internet connection.")
         return False
+    dropped = [t for t in tickers if t not in prices.columns]
+    if dropped:
+        st.warning(f"\u26a0\ufe0f No data found for {len(dropped)} ticker(s); they were skipped: {', '.join(dropped)}")
+        tickers = [t for t in tickers if t in prices.columns]
     returns = compute_returns(prices)
     with st.spinner("Resolving ticker names..."):
         ticker_names = fetch_ticker_names(tickers)
@@ -417,5 +500,14 @@ def load_sample_portfolio():
     st.session_state["returns"] = returns
     st.session_state["tickers"] = tickers
     st.session_state["ticker_names"] = ticker_names
+    # Auto-recommend a default optimal allocation
+    try:
+        from src.optimization import optimize_portfolio
+        _rf = st.session_state.get("risk_free_rate", 0.04)
+        rec = optimize_portfolio(prices, target="max_sharpe", risk_free_rate=_rf)
+        if rec:
+            save_recommended_weights(rec, "Auto: Max Sharpe")
+    except Exception:
+        pass
     st.toast(f"Loaded {len(prices)} trading days for {len(tickers)} assets", icon="\u2705")
     return True

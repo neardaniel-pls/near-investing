@@ -44,12 +44,13 @@ def optimize_portfolio(
     risk_free_rate: float = 0.04,
     market_caps: dict[str, float] | None = None,
     risk_aversion: float = 1,
+    delta: float = 2.5,
 ) -> dict[str, float]:
     mu = compute_expected_returns(prices)
     S = compute_covariance(prices)
 
     if market_prior is not None or views is not None:
-        return _black_litterman_optimize(prices, mu, S, target, risk_free_rate, market_prior, views, view_confidences, market_caps)
+        return _black_litterman_optimize(prices, mu, S, target, risk_free_rate, market_prior, views, view_confidences, market_caps, delta)
 
     if target == "max_sharpe":
         ef = EfficientFrontier(mu, S)
@@ -69,6 +70,11 @@ def optimize_portfolio(
     elif target == "efficient_return":
         if target_value is None:
             target_value = float(mu.mean())
+        ef_minvol = EfficientFrontier(mu, S)
+        ef_minvol.min_volatility()
+        floor_ret = ef_minvol.portfolio_performance(verbose=False)[0]
+        ceil_ret = float(mu.max())
+        target_value = min(max(target_value, floor_ret), ceil_ret)
         ef = EfficientFrontier(mu, S)
         ef.efficient_return(target_value)
         return dict(ef.clean_weights())
@@ -76,6 +82,11 @@ def optimize_portfolio(
     elif target == "efficient_risk":
         if target_value is None:
             target_value = float(np.sqrt(np.diag(S).mean())) * np.sqrt(252)
+        ef_minvol = EfficientFrontier(mu, S)
+        ef_minvol.min_volatility()
+        floor_vol = ef_minvol.portfolio_performance(verbose=False)[1]
+        ceil_vol = float(np.sqrt(np.diag(S).max())) * np.sqrt(252)
+        target_value = min(max(target_value, floor_vol), ceil_vol)
         ef = EfficientFrontier(mu, S)
         ef.efficient_risk(target_value)
         return dict(ef.clean_weights())
@@ -121,9 +132,9 @@ def _black_litterman_optimize(
     views: dict[str, float] | None = None,
     view_confidences: list[float] | None = None,
     market_caps: dict[str, float] | None = None,
+    delta: float = 2.5,
 ) -> dict[str, float]:
     tickers = list(prices.columns)
-    delta = 2.5
 
     if market_prior is not None:
         prior_weights = np.array([market_prior.get(t, 1.0 / len(tickers)) for t in tickers])
@@ -149,7 +160,7 @@ def _black_litterman_optimize(
 
         omega = np.diag(np.ones(len(view_keys)))
         if view_confidences is not None and len(view_confidences) == len(view_keys):
-            omega = np.diag(np.array(view_confidences))
+            omega = np.diag(np.array(view_confidences) ** 2)
 
         bl = black_litterman.BlackLittermanModel(
             S, pi=delta * S @ prior_weights, P=P, Q=Q, omega=omega
@@ -224,7 +235,11 @@ def efficient_frontier_data(prices: pd.DataFrame, n_points: int = 100, risk_free
     min_vol_perf = ef_min_vol.portfolio_performance()
 
     min_ret = min_vol_perf[0]
-    max_ret = max(mu) * 0.9
+    max_ret = float(mu.max()) * 0.9
+    if max_ret <= min_ret:
+        max_ret = float(mu.max())
+    if max_ret <= min_ret:
+        max_ret = min_ret + abs(min_ret) * 0.01 + 1e-6
     returns_range = np.linspace(min_ret, max_ret, n_points)
 
     frontier_returns = []
@@ -252,8 +267,14 @@ def efficient_frontier_data(prices: pd.DataFrame, n_points: int = 100, risk_free
 
 
 def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float = 0.04) -> dict[str, dict]:
-    from src.metrics import sortino_ratio, calmar_ratio, omega_ratio, cvar, max_drawdown, annualized_return, annualized_volatility, sharpe_ratio
+    from src.metrics import sortino_ratio, calmar_ratio, omega_ratio, cvar, max_drawdown
     from src.portfolio import build_portfolio_returns
+
+    mu = compute_expected_returns(prices)
+    S = compute_covariance(prices)
+    mu_arr = mu.values
+    S_arr = S.values
+    tickers = list(prices.columns)
 
     strategies = {
         "Max Sharpe": "max_sharpe",
@@ -265,17 +286,23 @@ def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float
         "HRP": "hrp",
     }
 
+    def _mv_perf(weights: dict) -> tuple[float, float, float]:
+        w = np.array([weights.get(t, 0.0) for t in tickers])
+        ret = float(mu_arr @ w)
+        risk = float(np.sqrt(w @ S_arr @ w))
+        sharpe = (ret - risk_free_rate) / risk if risk > 0 else 0.0
+        return ret, risk, sharpe
+
     points = {}
     for name, target in strategies.items():
         try:
             weights = optimize_portfolio(prices, target=target, risk_free_rate=risk_free_rate)
             port_ret = build_portfolio_returns(prices, weights)
-            ann_ret = annualized_return(port_ret)
-            ann_vol = annualized_volatility(port_ret)
+            mv_ret, mv_risk, mv_sharpe = _mv_perf(weights)
             points[name] = {
-                "return": ann_ret,
-                "risk": ann_vol,
-                "sharpe": sharpe_ratio(port_ret, rf=risk_free_rate),
+                "return": mv_ret,
+                "risk": mv_risk,
+                "sharpe": mv_sharpe,
                 "sortino": sortino_ratio(port_ret, rf=risk_free_rate),
                 "calmar": calmar_ratio(port_ret, rf=risk_free_rate),
                 "omega": omega_ratio(port_ret),
@@ -290,12 +317,11 @@ def compute_frontier_strategy_points(prices: pd.DataFrame, risk_free_rate: float
         kelly_w = kelly_criterion(prices)
         if kelly_w:
             port_ret = build_portfolio_returns(prices, kelly_w)
-            ann_ret = annualized_return(port_ret)
-            ann_vol = annualized_volatility(port_ret)
+            mv_ret, mv_risk, mv_sharpe = _mv_perf(kelly_w)
             points["Kelly Criterion"] = {
-                "return": ann_ret,
-                "risk": ann_vol,
-                "sharpe": sharpe_ratio(port_ret, rf=risk_free_rate),
+                "return": mv_ret,
+                "risk": mv_risk,
+                "sharpe": mv_sharpe,
                 "sortino": sortino_ratio(port_ret, rf=risk_free_rate),
                 "calmar": calmar_ratio(port_ret, rf=risk_free_rate),
                 "omega": omega_ratio(port_ret),
